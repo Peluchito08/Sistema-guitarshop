@@ -1,48 +1,35 @@
 /* src/index.css */
 
-/* =========================================================
-   1. Tailwind Core Directives
-   =========================================================
-   Estas tres directivas importan los estilos base,
-   los componentes predefinidos y las utilidades
-   personalizables de Tailwind CSS.
-*/
+/* Tailwind: expone capas base, components y utilities para todo el proyecto. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* =========================================================
-   2. Variables globales de color (modo claro/oscuro)
-   =========================================================
-   Permiten un diseño más elegante y adaptable.
-   Puedes cambiar el tema fácilmente editando estas variables.
-*/
+/* Paleta base editable; las vistas consumen colores vía CSS vars. */
 :root {
-  --color-bg: #f8fafc;       /* Fondo base: gris azulado muy claro */
-  --color-text: #1e293b;     /* Texto principal: gris azulado oscuro */
-  --color-card: #ffffff;     /* Tarjetas y secciones */
-  --color-border: #e2e8f0;   /* Líneas y divisores */
-  --color-primary: #059669;  /* Verde principal (Tailwind emerald-600) */
-  --color-accent: #10b981;   /* Verde acento (Tailwind emerald-500) */
-  --color-muted: #64748b;    /* Texto secundario */
+  --color-bg: #f8fafc;
+  --color-text: #1e293b;
+  --color-card: #ffffff;
+  --color-border: #e2e8f0;
+  --color-primary: #059669;
+  --color-accent: #10b981;
+  --color-muted: #64748b;
 }
 
-/* 🌙 Modo oscuro opcional */
+/* Tema oscuro respetando prefers-color-scheme. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #0f172a;       /* Azul oscuro elegante */
-    --color-text: #f8fafc;     /* Texto claro */
-    --color-card: #1e293b;     /* Tarjetas más oscuras */
-    --color-border: #334155;   /* Bordes sutiles */
-    --color-primary: #10b981;  /* Verde brillante */
+    --color-bg: #0f172a;
+    --color-text: #f8fafc;
+    --color-card: #1e293b;
+    --color-border: #334155;
+    --color-primary: #10b981;
     --color-accent: #34d399;
     --color-muted: #94a3b8;
   }
 }
 
-/* =========================================================
-   3. Reset + Base Global Styles
-   ========================================================= */
+/* Reset mínimo para estirar el layout y quitar márgenes heredados. */
 html,
 body,
 #root {
@@ -51,7 +38,7 @@ body,
   padding: 0;
 }
 
-/* Tipografía y color general */
+/* Base tipográfica con transición suave al alternar tema. */
 body {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
@@ -64,9 +51,7 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* =========================================================
-   4. Scrollbar personalizada (solo desktop)
-   ========================================================= */
+/* Scrollbar discreta para dispositivos con hover (principalmente desktop). */
 @media (hover: hover) {
   ::-webkit-scrollbar {
     width: 10px;
@@ -87,16 +72,11 @@ body {
   }
 }
 
-/* =========================================================
-   5. Componentes básicos reutilizables
-   ========================================================= */
-
-/* Contenedor general */
+/* Utilidades globales para layout y componentes base. */
 .app-container {
   @apply mx-auto max-w-7xl px-6 py-8;
 }
 
-/* Tarjeta base */
 .card {
   background-color: var(--color-card);
   border: 1px solid var(--color-border);
@@ -109,7 +89,6 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
-/* Botón base */
 .btn-primary {
   background-color: var(--color-primary);
   color: #fff;
@@ -132,9 +111,7 @@ a:hover {
   text-decoration: underline;
 }
 
-/* =========================================================
-   6. Ajustes de texto globales
-   ========================================================= */
+/* Tipografías de encabezados y párrafos coherentes en todo el sitio. */
 h1,
 h2,
 h3,
@@ -150,9 +127,7 @@ p {
   color: var(--color-muted);
 }
 
-/* =========================================================
-   7. Animaciones suaves
-   ========================================================= */
+/* Animación básica para entradas graduales. */
 .fade-in {
   animation: fadeIn 0.4s ease-in-out;
 }

@@ -1,9 +1,11 @@
-import Image from "next/image";
+import Image from "next/image"; // Componente optimizado de Next.js para manejar imágenes.
 
 export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+      {/* Contenedor que centra el contenido vertical y horizontalmente y adapta fondo claro/oscuro */}
       <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
+        {/* Sección principal que define el ancho máximo y distribuye bloques verticalmente */}
         <Image
           className="dark:invert"
           src="/next.svg"
@@ -12,7 +14,9 @@ export default function Home() {
           height={20}
           priority
         />
+        {/* Logo de Next.js con inversión automática en modo oscuro */}
         <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
+          {/* Bloque informativo centrado que muestra título e instrucciones iniciales */}
           <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
             To get started, edit the page.tsx file.
           </h1>
@@ -35,6 +39,7 @@ export default function Home() {
           </p>
         </div>
         <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
+          {/* CTA doble: despliegue inmediato en Vercel y acceso a la documentación oficial */}
           <a
             className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
             href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"

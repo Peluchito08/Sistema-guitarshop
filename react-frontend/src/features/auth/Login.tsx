@@ -2,32 +2,32 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { api } from "../../lib/apiClient";
+import { api } from "../../lib/apiClient"; // Cliente HTTP configurado para consumir el backend.
 
 const loginSchema = z.object({
   email: z.string().email("Correo inválido"),
   password: z.string().min(4, "Mínimo 4 caracteres"),
-});
+}); // Regla de validación declarativa usando Zod.
 
 type LoginInput = z.infer<typeof loginSchema>;
 
 export default function Login() {
-  const [apiError, setApiError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null); // Mensaje de error que proviene del backend o del fetch.
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
-    resolver: zodResolver(loginSchema),
+    resolver: zodResolver(loginSchema), // Integra las reglas de Zod con react-hook-form.
   });
 
   const onSubmit = async (data: LoginInput) => {
     try {
-      setApiError(null);
+      setApiError(null); // Limpiamos error previo antes de un nuevo intento.
 
       // endpoint real es /login
-      const res = await api.post("/login", data);
+      const res = await api.post("/login", data); // Se envían las credenciales al backend.
 
       const token = res.data?.token;
 
@@ -37,7 +37,7 @@ export default function Login() {
       }
 
       // Guardar token y redirigir al dashboard
-      localStorage.setItem("auth_token", token);
+      localStorage.setItem("auth_token", token); // Persistimos la sesión para rutas protegidas.
       window.location.href = "/"; // o "/dashboard"
     } catch (error: any) {
       console.error(error);

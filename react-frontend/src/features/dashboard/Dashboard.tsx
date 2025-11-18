@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../../lib/apiClient";
+import { api } from "../../lib/apiClient"; // Cliente Axios preconfigurado con URL base y headers.
 
 // Tipo que esperamos desde /api/usuarios
 interface UsuarioDashboard {
@@ -12,9 +12,9 @@ interface UsuarioDashboard {
 }
 
 export default function Dashboard() {
-  const [usuarios, setUsuarios] = useState<UsuarioDashboard[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [usuarios, setUsuarios] = useState<UsuarioDashboard[]>([]); // Estado con la lista recibida desde el backend.
+  const [loading, setLoading] = useState<boolean>(false); // Indicador de carga mientras se espera la respuesta.
+  const [error, setError] = useState<string | null>(null); // Mensaje de error si falla la petición.
 
   useEffect(() => {
     const fetchUsuarios = async () => {
@@ -22,8 +22,8 @@ export default function Dashboard() {
         setLoading(true);
         setError(null);
 
-        // 🔐 Esta ruta está protegida con JWT en el backend
-        const res = await api.get<UsuarioDashboard[]>("/usuarios");
+        // Esta ruta está protegida con JWT en el backend
+        const res = await api.get<UsuarioDashboard[]>("/usuarios"); // Consulta al endpoint para obtener usuarios recientes.
         setUsuarios(res.data);
       } catch (err) {
         console.error(err);
@@ -39,7 +39,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
-        {/* Header */}
+        {/* Header principal del panel */}
         <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold">
@@ -51,7 +51,7 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Estados globales */}
+        {/* Estados globales: carga/errores */}
         {loading && (
           <p className="text-sm text-slate-600">Cargando información...</p>
         )}
@@ -62,7 +62,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Tarjetas de resumen */}
+        {/* Tarjetas de resumen (KPIs) */}
         {!loading && !error && (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
@@ -90,7 +90,7 @@ export default function Dashboard() {
           </section>
         )}
 
-        {/* Tabla de usuarios */}
+        {/* Tabla de usuarios recientes */}
         {!loading && !error && usuarios.length > 0 && (
           <section className="mt-4 rounded-2xl bg-white border border-slate-200 shadow-sm">
             <div className="border-b border-slate-100 px-4 py-3">
@@ -142,7 +142,7 @@ export default function Dashboard() {
           </section>
         )}
 
-        {/* Mensaje cuando no hay usuarios todavía */}
+        {/* Estado vacío cuando no hay usuarios */}
         {!loading && !error && usuarios.length === 0 && (
           <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-500">
             <p className="font-medium text-slate-700">
