@@ -1,27 +1,62 @@
-import { NextResponse } from 'next/server';
-import prisma from '../../../../lib/prisma';
+import { jsonCors, optionsCors } from "../../../../lib/cors";
+import { verifyToken } from "../../../../lib/auth";
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
-  const proveedor = await prisma.proveedor.findUnique({
-    where: { id_proveedor: Number(params.id) },
-    include: { producto: true, compra: true },
-  });
+import {
+  getProveedorById,
+  updateProveedor,
+  deleteProveedor,
+  type ProveedorCreateInput,
+} from "../../../../lib/services/proveedorService";
 
-  return proveedor
-    ? NextResponse.json(proveedor)
-    : NextResponse.json({ error: 'Proveedor no encontrado' }, { status: 404 });
+function getId(req: Request) {
+  const url = new URL(req.url);
+  const id = Number(url.pathname.split("/").pop());
+  return Number.isNaN(id) ? null : id;
 }
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
-  const body = await request.json();
-  const actualizado = await prisma.proveedor.update({
-    where: { id_proveedor: Number(params.id) },
-    data: body,
-  });
-  return NextResponse.json(actualizado);
+export async function OPTIONS() {
+  return optionsCors();
 }
 
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
-  await prisma.proveedor.delete({ where: { id_proveedor: Number(params.id) } });
-  return NextResponse.json({ mensaje: 'Proveedor eliminado' });
+// GET /api/proveedores/:id
+export async function GET(req: Request) {
+  const validation = verifyToken(req);
+  if (!validation.valid)
+    return jsonCors({ error: validation.message }, { status: 401 });
+
+  const id = getId(req);
+  if (!id) return jsonCors({ message: "ID inválido" }, { status: 400 });
+
+  const prov = await getProveedorById(id);
+  if (!prov) return jsonCors({ message: "Proveedor no encontrado" }, { status: 404 });
+
+  return jsonCors(prov);
+}
+
+// PUT /api/proveedores/:id
+export async function PUT(req: Request) {
+  const validation = verifyToken(req);
+  if (!validation.valid)
+    return jsonCors({ error: validation.message }, { status: 401 });
+
+  const id = getId(req);
+  if (!id) return jsonCors({ message: "ID inválido" }, { status: 400 });
+
+  const body = (await req.json()) as Partial<ProveedorCreateInput>;
+
+  const actualizado = await updateProveedor(id, body);
+  return jsonCors(actualizado);
+}
+
+// DELETE /api/proveedores/:id
+export async function DELETE(req: Request) {
+  const validation = verifyToken(req);
+  if (!validation.valid)
+    return jsonCors({ error: validation.message }, { status: 401 });
+
+  const id = getId(req);
+  if (!id) return jsonCors({ message: "ID inválido" }, { status: 400 });
+
+  const eliminado = await deleteProveedor(id);
+  return jsonCors(eliminado);
 }

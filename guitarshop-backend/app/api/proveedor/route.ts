@@ -1,15 +1,68 @@
-import { NextResponse } from 'next/server';
-import prisma from '../../../lib/prisma';
+import { jsonCors, optionsCors } from "../../../lib/cors";
+import { verifyToken } from "../../../lib/auth";
 
-export async function GET() {
-  const proveedores = await prisma.proveedor.findMany({
-    include: { producto: true, compra: true },
-  });
-  return NextResponse.json(proveedores);
+import {
+  getAllProveedores,
+  createProveedor,
+  type ProveedorCreateInput,
+} from "../../../lib/services/proveedorService";
+
+export async function OPTIONS() {
+  return optionsCors();
 }
 
+// GET /api/proveedores  -> lista todos
+export async function GET(request: Request) {
+  const validation = verifyToken(request);
+  if (!validation.valid) {
+    return jsonCors({ error: validation.message }, { status: 401 });
+  }
+
+  const proveedores = await getAllProveedores();
+  return jsonCors(proveedores);
+}
+
+// POST /api/proveedores -> crear
 export async function POST(request: Request) {
-  const body = await request.json();
-  const nuevo = await prisma.proveedor.create({ data: body });
-  return NextResponse.json(nuevo);
+  try {
+    const body = (await request.json()) as Partial<ProveedorCreateInput>;
+
+    // Validaciones mínimas
+    if (!body.nombre_proveedor) {
+      return jsonCors(
+        { message: "El nombre del proveedor es obligatorio" },
+        { status: 400 }
+      );
+    }
+    if (!body.telefono) {
+      return jsonCors(
+        { message: "El teléfono es obligatorio" },
+        { status: 400 }
+      );
+    }
+    if (!body.correo) {
+      return jsonCors(
+        { message: "El correo es obligatorio" },
+        { status: 400 }
+      );
+    }
+    if (!body.direccion) {
+      return jsonCors(
+        { message: "La dirección es obligatoria" },
+        { status: 400 }
+      );
+    }
+    if (body.id_estado === undefined || body.id_estado === null) {
+      return jsonCors(
+        { message: "El id_estado es obligatorio" },
+        { status: 400 }
+      );
+    }
+
+    const nuevoProveedor = await createProveedor(body as ProveedorCreateInput);
+    return jsonCors(nuevoProveedor, { status: 201 });
+  } catch (error) {
+    console.error("Error al crear proveedor:", error);
+    return jsonCors({ message: "Error al crear proveedor" }, { status: 500 });
+  }
 }

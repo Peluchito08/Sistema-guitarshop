@@ -1,31 +1,58 @@
-import { NextResponse } from 'next/server';
-import prisma from '../../../../lib/prisma';
+import { jsonCors, optionsCors } from "../../../../lib/cors";
+import { verifyToken } from "../../../../lib/auth";
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
-  const compra = await prisma.compra.findUnique({
-    where: { id_compra: Number(params.id) },
-    include: {
-      proveedor: true,
-      usuario: true,
-      producto_compra: true,
-    },
-  });
+import {
+  getCompraById,
+  updateCompra,
+  deleteCompra,
+} from "../../../../lib/services/compraService";
 
-  return compra
-    ? NextResponse.json(compra)
-    : NextResponse.json({ error: 'Compra no encontrada' }, { status: 404 });
+function getId(req: Request) {
+  const url = new URL(req.url);
+  const id = Number(url.pathname.split("/").pop());
+  return isNaN(id) ? null : id;
 }
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
-  const body = await request.json();
-  const actualizada = await prisma.compra.update({
-    where: { id_compra: Number(params.id) },
-    data: body,
-  });
-  return NextResponse.json(actualizada);
+export async function OPTIONS() {
+  return optionsCors();
 }
 
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
-  await prisma.compra.delete({ where: { id_compra: Number(params.id) } });
-  return NextResponse.json({ mensaje: 'Compra eliminada' });
+// GET /api/compra/:id
+export async function GET(req: Request) {
+  const v = verifyToken(req);
+  if (!v.valid) return jsonCors({ error: v.message }, { status: 401 });
+
+  const id = getId(req);
+  if (!id) return jsonCors({ message: "ID inválido" }, { status: 400 });
+
+  const compra = await getCompraById(id);
+  if (!compra) return jsonCors({ message: "Compra no encontrada" }, { status: 404 });
+
+  return jsonCors(compra);
+}
+
+// PUT /api/compra/:id
+export async function PUT(req: Request) {
+  const v = verifyToken(req);
+  if (!v.valid) return jsonCors({ error: v.message }, { status: 401 });
+
+  const id = getId(req);
+  if (!id) return jsonCors({ message: "ID inválido" }, { status: 400 });
+
+  const body = await req.json();
+  const actualizada = await updateCompra(id, body);
+
+  return jsonCors(actualizada);
+}
+
+// DELETE /api/compra/:id
+export async function DELETE(req: Request) {
+  const v = verifyToken(req);
+  if (!v.valid) return jsonCors({ error: v.message }, { status: 401 });
+
+  const id = getId(req);
+  if (!id) return jsonCors({ message: "ID inválido" }, { status: 400 });
+
+  await deleteCompra(id);
+  return jsonCors({ message: "Compra eliminada" });
 }
