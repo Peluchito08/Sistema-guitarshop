@@ -241,6 +241,7 @@ export default function VentasPage() {
   const detalleValues = useWatch({ control: form.control, name: "detalle" })
   const formaPagoWatch = useWatch({ control: form.control, name: "forma_pago" })
 
+  
   // Tabla principal: trae las ventas más recientes para admins.
   const ventasQuery = useQuery<VentaListRecord[]>({
     queryKey: ["ventas"],
@@ -389,6 +390,7 @@ export default function VentasPage() {
     })
     return map
   }, [productos])
+
 
   // Totales en vivo: recalculan subtotal, IVA y total según el detalle.
   const totals = useMemo(() => {

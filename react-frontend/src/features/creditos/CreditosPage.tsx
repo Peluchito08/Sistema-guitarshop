@@ -80,6 +80,35 @@ const cuotaStatusClasses: Record<string, string> = {
   PAGADA: "bg-emerald-100 text-emerald-800",
 }
 
+type RawCuota = {
+  id_cuota?: number
+  numero_cuota?: number
+  fecha_vencimiento?: string
+  monto_cuota?: unknown
+  monto_pagado?: unknown
+  estado_cuota?: string
+  fecha_pago?: string | null
+}
+
+type RawFactura = {
+  id_factura?: number
+  numero_factura?: string
+  total?: unknown
+  cliente?: ClienteMini | null
+} | null
+
+type RawCredito = {
+  id_credito?: number
+  id_factura?: number
+  monto_total?: unknown
+  saldo_pendiente?: unknown
+  fecha_inicio?: string
+  fecha_fin?: string | null
+  id_estado?: number
+  factura?: RawFactura
+  cuota?: RawCuota[] | null
+}
+
 // Algunos endpoints todavía devuelven strings: aquí los hacemos digeribles.
 const safeNumber = (value: unknown) => {
   if (typeof value === "number") return value
@@ -91,34 +120,38 @@ const safeNumber = (value: unknown) => {
 }
 
 // Aplanamos la respuesta del backend para que el frontend trabaje con datos coherentes.
-const mapCreditoRecord = (raw: any): CreditoRecord => ({
-  id_credito: raw?.id_credito ?? 0,
-  id_factura: raw?.id_factura ?? 0,
-  monto_total: safeNumber(raw?.monto_total),
-  saldo_pendiente: safeNumber(raw?.saldo_pendiente),
-  fecha_inicio: raw?.fecha_inicio ?? "",
-  fecha_fin: raw?.fecha_fin ?? null,
-  id_estado: raw?.id_estado ?? 0,
-  factura: raw?.factura
-    ? {
-        id_factura: raw.factura.id_factura ?? 0,
-        numero_factura: raw.factura.numero_factura ?? `F-${raw?.id_factura ?? ""}`,
-        total: safeNumber(raw.factura.total),
-        cliente: raw.factura.cliente ?? null,
-      }
-    : null,
-  cuota: Array.isArray(raw?.cuota)
-    ? raw.cuota.map((item: any) => ({
-        id_cuota: item.id_cuota ?? 0,
-        numero_cuota: item.numero_cuota ?? 0,
-        fecha_vencimiento: item.fecha_vencimiento ?? "",
-        monto_cuota: safeNumber(item.monto_cuota),
-        monto_pagado: safeNumber(item.monto_pagado),
-        estado_cuota: item.estado_cuota ?? "PENDIENTE",
-        fecha_pago: item.fecha_pago ?? null,
-      }))
-    : [],
-})
+const mapCreditoRecord = (rawInput: unknown): CreditoRecord => {
+  const raw = (rawInput ?? {}) as RawCredito
+  const factura = raw?.factura ?? null
+  const cuotas = Array.isArray(raw?.cuota) ? (raw?.cuota as RawCuota[]) : []
+
+  return {
+    id_credito: raw?.id_credito ?? 0,
+    id_factura: raw?.id_factura ?? 0,
+    monto_total: safeNumber(raw?.monto_total),
+    saldo_pendiente: safeNumber(raw?.saldo_pendiente),
+    fecha_inicio: raw?.fecha_inicio ?? "",
+    fecha_fin: raw?.fecha_fin ?? null,
+    id_estado: raw?.id_estado ?? 0,
+    factura: factura
+      ? {
+          id_factura: factura.id_factura ?? 0,
+          numero_factura: factura.numero_factura ?? `F-${raw?.id_factura ?? ""}`,
+          total: safeNumber(factura.total),
+          cliente: factura.cliente ?? null,
+        }
+      : null,
+    cuota: cuotas.map((item) => ({
+      id_cuota: item.id_cuota ?? 0,
+      numero_cuota: item.numero_cuota ?? 0,
+      fecha_vencimiento: item.fecha_vencimiento ?? "",
+      monto_cuota: safeNumber(item.monto_cuota),
+      monto_pagado: safeNumber(item.monto_pagado),
+      estado_cuota: item.estado_cuota ?? "PENDIENTE",
+      fecha_pago: item.fecha_pago ?? null,
+    })),
+  }
+}
 
 // Siempre mostramos el error real del API antes de caer en un mensaje genérico.
 const getApiErrorMessage = (error: unknown, fallback: string) => {
@@ -174,8 +207,7 @@ export default function CreditosPage() {
     },
   })
 
-  const creditos = creditosQuery.data ?? []
-  const today = new Date()
+  const creditos = useMemo(() => creditosQuery.data ?? [], [creditosQuery.data])
 
   // Métricas rápidas para el header: cuántos créditos siguen vivos y cuánto debemos.
   const activos = useMemo(() => creditos.filter((c) => c.saldo_pendiente > 0.05).length, [creditos])
@@ -200,14 +232,10 @@ export default function CreditosPage() {
     )
   }, [creditos])
 
-  const cuotasVencidas = useMemo(
-    () =>
-      cuotasPendientes.filter((cuota) => {
-        const due = new Date(cuota.fecha_vencimiento)
-        return due < today
-      }),
-    [cuotasPendientes, today]
-  )
+  const cuotasVencidas = useMemo(() => {
+    const now = Date.now()
+    return cuotasPendientes.filter((cuota) => new Date(cuota.fecha_vencimiento).getTime() < now)
+  }, [cuotasPendientes])
 
   // Side card con las siguientes fechas que debemos monitorear.
   const proximasCuotas = useMemo(() => {
@@ -280,9 +308,10 @@ export default function CreditosPage() {
 
   // Definimos el estado visual del crédito en base al saldo y si arrastra cuotas vencidas.
   const getCreditStatus = (credit: CreditoRecord) => {
+    const now = Date.now()
     const hasOverdue = credit.cuota.some((cuota) => {
       if (cuota.estado_cuota === "PAGADA") return false
-      return new Date(cuota.fecha_vencimiento) < today
+      return new Date(cuota.fecha_vencimiento).getTime() < now
     })
 
     if (credit.saldo_pendiente <= 0.01) {
