@@ -23,6 +23,9 @@ export function jsonCors<T>(body: T, init?: ResponseInit) {
 
 
 export function optionsCors() {
-  const res = new NextResponse(null, { status: 204 });
+  // 200 evita confusiones en algunos clientes; el preflight no debe validar token.
+  // Max-Age reduce la cantidad de preflights repetidos en dev.
+  const res = new NextResponse(null, { status: 200 });
+  res.headers.set("Access-Control-Max-Age", "86400");
   return setCorsHeaders(res);
 }

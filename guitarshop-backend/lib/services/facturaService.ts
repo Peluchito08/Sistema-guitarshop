@@ -328,7 +328,9 @@ export async function actualizarVenta(dataId: number, data: {
     throw new Error("VENTA_NO_ENCONTRADA");
   }
 
-  const updateData: Prisma.facturaUpdateInput = {};
+  // Usamos UncheckedUpdateInput para poder asignar directamente el FK opcional
+  // (Prisma omite algunos campos FK en el UpdateInput “checked”).
+  const updateData: Prisma.facturaUncheckedUpdateInput = {};
 
   if (data.observacion !== undefined) {
     const obs = data.observacion?.trim();
@@ -418,9 +420,9 @@ export async function anularVenta(
       });
     }
 
-    if (factura.credito) {
-      await tx.credito.delete({
-        where: { id_credito: factura.credito.id_credito },
+    if (factura.credito.length > 0) {
+      await tx.credito.deleteMany({
+        where: { id_factura: factura.id_factura },
       });
     }
 

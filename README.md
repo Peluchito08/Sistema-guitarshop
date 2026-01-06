@@ -29,6 +29,8 @@ guitarshop/
 | [PostgreSQL](https://www.postgresql.org/download/) 
 | VS Code (opcional)
 
+> Nota: este repo está probado con **Node.js 20.x** (ver `engines` en los `package.json`).
+
 ## 🚀 Clonar el Repositorio
 
 git clone https://github.com/<TU_USUARIO>/Guitarshop.git
@@ -44,17 +46,26 @@ npm install
 
 ### 2️⃣ Crear la base de datos local en PostgreSQL
 
-Abrir **pgAdmin** o su consola de PostgreSQL y ejecutar el código de la base de datos
+Tienes dos opciones (elige **solo una**):
+
+**Opción A (recomendada): Prisma migrations**
+- Crea una base vacía llamada `guitarshop`.
+- No importes `guitarshop.sql`.
+
+**Opción B: Importar el SQL**
+- Crea una base `guitarshop`.
+- Importa/ejecuta `guitarshop.sql`.
+- En este caso **no ejecutes** `prisma migrate dev` (ya existen tablas).
 
 ### 3️⃣ Configurar las variables de entorno
 
-Dentro de la carpeta `guitarshop-backend`, crea un archivo llamado `.env` con este contenido:
+Dentro de la carpeta `guitarshop-backend`, copia `.env.example` a `.env` y ajusta lo necesario.
 
-# URL de conexión local a PostgreSQL
-DATABASE_URL="postgresql://postgres:12345@localhost:5432/guitarshop?schema=public"
+Mínimo requerido:
 
-# Clave secreta para JWT (se puede cambiar)
-JWT_SECRET="GuitarShop_123"
+- `DATABASE_URL` (tu usuario/contraseña/puerto pueden variar)
+- `JWT_SECRET`
+- `CORS_ORIGIN` (por defecto `http://localhost:5173`)
 
 > 🔸 Si tu usuario o contraseña de PostgreSQL son distintos, cámbialos en la URL:
 >
@@ -65,11 +76,16 @@ JWT_SECRET="GuitarShop_123"
 
 ### 4️⃣ Generar el Cliente Prisma y Migrar Tablas
 
+Si usas **Opción A (Prisma migrations)**:
+
 npx prisma generate
 npx prisma migrate dev --name init
 
+Si usas **Opción B (importaste guitarshop.sql)**:
 
-Esto creará todas las tablas en la base de datos local.
+npx prisma generate
+
+Esto evita errores por tablas ya existentes.
 
 Para abrir el panel de control visual de Prisma:
 
@@ -91,6 +107,15 @@ Por defecto se ejecutará en:
 ## 💻 Configurar el Frontend
 
 cd ../react-frontend
+
+### 1️⃣ Variables de entorno del frontend
+
+Copia `.env.example` a `.env` y deja:
+
+VITE_API_BASE_URL=http://localhost:3000/api
+
+### 2️⃣ Instalar y ejecutar
+
 npm install
 npm run dev
 

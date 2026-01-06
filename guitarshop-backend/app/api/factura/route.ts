@@ -51,13 +51,28 @@ export const POST = withErrorHandling(async (req: Request) => {
 	}
 
 	const body = await req.json();
+	const detalleSchema = z.object({
+		id_producto: z.number().int().positive(),
+		cantidad: z.number().int().positive(),
+		precio_unitario: z.number().positive(),
+		descuento: z.number().nonnegative().optional(),
+	});
+
+	const creditoConfigSchema = z
+		.object({
+			numero_cuotas: z.number().int().positive(),
+			fecha_primer_vencimiento: z.string().min(1),
+			dias_entre_cuotas: z.number().int().positive().optional(),
+		})
+		.passthrough();
+
 	const schema = z
 		.object({
 			id_cliente: z.number().int().positive(),
 			forma_pago: z.enum(["CONTADO", "CREDITO"]).optional(),
 			observacion: z.string().trim().nullable().optional(),
-			detalle: z.array(z.unknown()).optional(),
-			creditoConfig: z.unknown().optional(),
+			detalle: z.array(detalleSchema).min(1),
+			creditoConfig: creditoConfigSchema.optional(),
 		})
 		.passthrough();
 
@@ -68,7 +83,7 @@ export const POST = withErrorHandling(async (req: Request) => {
 		id_usuario: auth.userId,
 		forma_pago: dto.forma_pago ?? "CONTADO",
 		observacion: dto.observacion ?? null,
-		detalle: (dto.detalle as unknown[]) ?? [],
+		detalle: dto.detalle,
 		creditoConfig: dto.creditoConfig,
 		id_usuario_modifi: auth.userId,
 	});
