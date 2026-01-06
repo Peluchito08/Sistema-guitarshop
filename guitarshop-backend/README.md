@@ -22,7 +22,7 @@ CORS_ORIGIN="http://localhost:5173"
 ```bash
 npm install
 npx prisma generate
-npx prisma migrate dev
+npx prisma migrate deploy
 npm run dev
 ```
 

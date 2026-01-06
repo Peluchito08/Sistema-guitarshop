@@ -79,7 +79,10 @@ Mínimo requerido:
 Si usas **Opción A (Prisma migrations)**:
 
 npx prisma generate
-npx prisma migrate dev --name init
+npx prisma migrate deploy
+
+> Nota: `migrate deploy` aplica las migraciones ya versionadas en `prisma/migrations`.
+> `migrate dev --name ...` se usa cuando vas a **crear** una migración nueva (cambiaste el schema).
 
 Si usas **Opción B (importaste guitarshop.sql)**:
 

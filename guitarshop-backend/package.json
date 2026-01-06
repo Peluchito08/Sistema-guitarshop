@@ -13,6 +13,7 @@
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "setup": "npm run db:generate && npm run db:migrate",
     "seed:admin": "tsx scripts/createAdminUser.ts"
