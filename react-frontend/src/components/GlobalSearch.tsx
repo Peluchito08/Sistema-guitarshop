@@ -8,6 +8,7 @@ import { ArrowUpRight, Loader2, Package, Search, UserRound, Wallet } from "lucid
 import { api } from "../lib/apiClient"
 import { appNavItems, type NavItem } from "../lib/navigation"
 import { cn } from "../lib/utils"
+import { useDebouncedValue } from "../lib/hooks/useDebouncedValue"
 
 const searchPlaceholder = "Busca productos, clientes o facturas (Ctrl + K)"
 const priceFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" })
@@ -60,15 +61,6 @@ const emptyResults: SearchResponse = {
   productos: [],
   clientes: [],
   facturas: [],
-}
-
-const useDebouncedValue = (value: string, delay = 250) => {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const handler = window.setTimeout(() => setDebounced(value), delay)
-    return () => window.clearTimeout(handler)
-  }, [value, delay])
-  return debounced
 }
 
 export const GlobalSearch = () => {

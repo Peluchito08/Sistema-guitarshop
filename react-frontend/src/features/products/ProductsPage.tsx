@@ -1,36 +1,31 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent } from "react"
 import { isAxiosError } from "axios"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
 	AlertCircle,
 	Boxes,
-	Download,
-	Edit2,
-	FileDown,
 	Image as ImageIcon,
 	Loader2,
 	Package,
+	Pencil,
 	Plus,
 	ShieldAlert,
-	Sparkles,
 	Trash2,
 	UploadCloud,
 } from "lucide-react"
 import * as XLSX from "xlsx"
-import jsPDF from "jspdf"
-import autoTable from "jspdf-autotable"
 
-import { api } from "../../lib/apiClient"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog"
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "../../components/ui/drawer"
 import { useAuthUser } from "../../lib/hooks/useAuthUser"
+import { useDebouncedValue } from "../../lib/hooks/useDebouncedValue"
 import {
 	getCategoryPrefix,
 	matchCategoryValue,
@@ -38,61 +33,40 @@ import {
 	type ProductCategoryValue,
 } from "../../config/productCategories"
 
-type ProductoRecord = {
-	id_producto: number
-	codigo_producto: string
-	nombre_producto: string
-	descripcion: string | null
-	id_proveedor: number | null
-	precio_compra: number
-	precio_venta: number
-	cantidad_stock: number
-	stock_minimo: number
-	proveedor?: {
-		id_proveedor: number
-		nombre_proveedor: string
-	} | null
-}
+import type { ProductsFilters, ProductsViewMode } from "./product.types"
+import type { ProductoPayload, ProductoRecord, ProductSalesSummary, ProveedorRecord } from "./product.types"
+import { productClient } from "./product.client"
+import {
+	computeMargin,
+	computeMarginPercent,
+	marginStatusLabel,
+	marginStatusWeight,
+	matchesMarginFilter,
+	matchesSalesFilter,
+	matchesStockFilter,
+	productStockStatusLabel,
+	resolveStockStatus,
+	resolveMarginStatus,
+	resolveProductStockStatus,
+	resolveSalesStatus,
+	stockStatusLabel,
+	salesStatusLabel,
+	salesStatusWeight,
+	stockStatusWeight,
+} from "./product.utils"
+import {
+	productsQueryKey,
+	useKardexQuery,
+	useProductImagesQuery,
+	useProductSalesSummaryQuery,
+	useProductsQuery,
+	useProvidersQuery,
+} from "./useProductsQuery"
+import { exportToCSV, exportToPDF, exportToXLSX, type ExportRow as ExportFileRow } from "./exportProducts"
 
-type ProveedorRecord = {
-	id_proveedor: number
-	nombre_proveedor: string
-}
-
-type VentaListRecord = {
-	id_factura: number
-	numero_factura: string
-	fecha_factura: string
-}
-
-type VentaDetailRecord = VentaListRecord & {
-	detalle_factura: Array<{
-		id_detalle_factura: number
-		id_producto: number
-		cantidad: number
-		precio_unitario: number
-		subtotal: number
-		producto: {
-			codigo_producto: string
-			nombre_producto: string
-		}
-	}>
-}
-
-type ProductSaleLine = {
-	id_factura: number
-	numero_factura: string
-	fecha_factura: string
-	cantidad: number
-	precio_unitario: number
-	subtotal: number
-}
-
-type ProductSalesSummary = {
-	totalUnitsSold: number
-	lastSaleDate: string | null
-	recentLines: ProductSaleLine[]
-}
+import { ProductsFiltersDrawer } from "./components/ProductsFiltersDrawer"
+import { ProductsListHeader } from "./components/ProductsListHeader"
+import { ProductsDetailDrawer } from "./components/ProductsDetailDrawer"
 
 type ModalMode = "single" | "import"
 
@@ -148,8 +122,10 @@ type ApiErrorResponse = {
 	message?: string
 }
 
-const MAX_VISIBLE_PRODUCTS = 6
-const EXPANDED_PAGE_SIZE = 10
+const PAGE_SIZE_STORAGE_KEY = "products.pageSize"
+const PAGE_SIZE_OPTIONS = [8, 16, 24, 32] as const
+type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number]
+const DEFAULT_PAGE_SIZE: PageSizeOption = 16
 
 const importFieldConfig: { key: ImportFieldKey; label: string; required: boolean }[] = [
 	{ key: "nombre_producto", label: "Nombre", required: true },
@@ -189,22 +165,22 @@ const productoSchema = z.object({
 		}, "Selecciona un proveedor válido"),
 })
 
+// Schema del formulario (modal) con numéricos como string mientras el usuario escribe.
+// La conversión y validación numérica se hace únicamente al guardar (onSubmit).
+const productoFormSchema = productoSchema
+	.omit({ precio_compra: true, precio_venta: true, cantidad_stock: true, stock_minimo: true })
+	.extend({
+		precio_compra: z.string(),
+		precio_venta: z.string(),
+		cantidad_stock: z.string(),
+		stock_minimo: z.string(),
+	})
+
 const bulkProductoSchema = productoSchema.extend({
 	codigo_producto: z.string().trim().max(30, "Máximo 30 caracteres").or(z.literal("")),
 })
 
-type ProductoFormValues = z.infer<typeof productoSchema>
-
-type ProductoPayload = {
-	codigo_producto: string
-	nombre_producto: string
-	descripcion: string | null
-	id_proveedor: number
-	precio_compra: number
-	precio_venta: number
-	cantidad_stock: number
-	stock_minimo: number
-}
+type ProductoModalFormValues = z.infer<typeof productoFormSchema>
 
 const currency = new Intl.NumberFormat("es-EC", {
 	style: "currency",
@@ -217,16 +193,16 @@ const dateFormatter = new Intl.DateTimeFormat("es-EC", {
 	timeStyle: "short",
 })
 
-const defaultValues: ProductoFormValues = {
+const defaultValues: ProductoModalFormValues = {
 	categoria: "",
 	codigo_producto: "",
 	nombre_producto: "",
 	descripcion: "",
 	imagen_url: "",
-	precio_compra: 0,
-	precio_venta: 0,
-	cantidad_stock: 0,
-	stock_minimo: 0,
+	precio_compra: "0",
+	precio_venta: "0",
+	cantidad_stock: "0",
+	stock_minimo: "0",
 	id_proveedor: "",
 }
 
@@ -349,17 +325,69 @@ const resolveProveedorId = (value: string, proveedores: ProveedorRecord[]) => {
 	return byName?.id_proveedor ?? null
 }
 
-const buildExportRows = (records: ProductoRecord[]) =>
-	records.map((producto) => ({
-		Codigo: producto.codigo_producto,
-		Producto: producto.nombre_producto,
-		Categoria: inferCategoryFromCode(producto.codigo_producto)?.toUpperCase() ?? "N/D",
-		Proveedor: producto.proveedor?.nombre_proveedor ?? "Sin proveedor",
-		"Precio compra": Number(producto.precio_compra ?? 0),
-		"Precio venta": Number(producto.precio_venta ?? 0),
-		"Stock actual": producto.cantidad_stock,
-		"Stock mínimo": producto.stock_minimo,
-	}))
+type ExportScope = "page" | "filtered" | "all"
+
+type ProductExportRow = {
+	Código: string
+	Categoría: string
+	Nombre: string
+	Proveedor: string
+	Venta: string
+	Compra: string
+	Margen: string
+	StockActual: string
+	StockMinimo: string
+	Estado: string
+	Ventas30d: string
+}
+
+const formatMoney = (value: number | null | undefined) => {
+	if (value === null || value === undefined) return "—"
+	const numeric = Number(value)
+	if (!Number.isFinite(numeric)) return "—"
+	return new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric)
+}
+
+const formatCell = (value: unknown) => {
+	if (value === null || value === undefined) return "—"
+	if (typeof value === "string") return value.trim() ? value : "—"
+	if (typeof value === "number") return Number.isFinite(value) ? String(value) : "—"
+	return String(value)
+}
+
+const buildExportRows = (records: ProductoRecord[], getSalesSummary: (idProducto: number) => ProductSalesSummary | null) =>
+	records.map<ProductExportRow>((producto) => {
+		const venta = Number(producto.precio_venta ?? 0)
+		const compraNumber = Number(producto.precio_compra ?? 0)
+		const hasCompra = Number.isFinite(compraNumber) && compraNumber > 0
+		const margen = hasCompra ? venta - compraNumber : null
+
+		const stockStatus = resolveProductStockStatus(producto)
+		const marginStatus = resolveMarginStatus(producto)
+		const summary = getSalesSummary(producto.id_producto)
+		const salesStatus = resolveSalesStatus(summary)
+
+		const estadoParts = [
+			`Stock: ${productStockStatusLabel(stockStatus)}`,
+			salesStatus ? `Ventas: ${salesStatusLabel(salesStatus)}` : "Ventas: —",
+			`Margen: ${marginStatusLabel(marginStatus)}`,
+			!hasCompra ? "Compra: Sin costo" : null,
+		].filter(Boolean)
+
+		return {
+			Código: formatCell(producto.codigo_producto),
+			Categoría: formatCell(inferCategoryFromCode(producto.codigo_producto)?.toUpperCase() ?? "N/D"),
+			Nombre: formatCell(producto.nombre_producto),
+			Proveedor: formatCell(producto.proveedor?.nombre_proveedor ?? "Sin proveedor"),
+			Venta: formatMoney(venta),
+			Compra: hasCompra ? formatMoney(compraNumber) : "—",
+			Margen: margen === null ? "—" : formatMoney(margen),
+			StockActual: formatCell(Number(producto.cantidad_stock ?? 0)),
+			StockMinimo: formatCell(Number(producto.stock_minimo ?? 0)),
+			Estado: estadoParts.join(" | "),
+			Ventas30d: summary ? formatCell(summary.last30DaysUnitsSold) : "—",
+		}
+	})
 
 const formatDateStamp = () =>
 	new Date()
@@ -368,9 +396,41 @@ const formatDateStamp = () =>
 		.replace("T", "_")
 		.slice(0, 16)
 
+const useFloatingMenu = () => {
+	const [open, setOpen] = useState(false)
+	const ref = useRef<HTMLDivElement | null>(null)
+
+	useEffect(() => {
+		if (!open) return
+
+		const handleMouseDown = (event: MouseEvent) => {
+			const target = event.target
+			if (!(target instanceof Node)) return
+			if (ref.current && ref.current.contains(target)) return
+			setOpen(false)
+		}
+
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setOpen(false)
+			}
+		}
+
+		document.addEventListener("mousedown", handleMouseDown)
+		document.addEventListener("keydown", handleKeyDown)
+		return () => {
+			document.removeEventListener("mousedown", handleMouseDown)
+			document.removeEventListener("keydown", handleKeyDown)
+		}
+	}, [open])
+
+	return { open, setOpen, ref }
+}
+
 export default function ProductsPage() {
 	const { isAdmin } = useAuthUser()
 	const queryClient = useQueryClient()
+	const salesQueriesVersion = useIsFetching({ queryKey: ["producto-ventas"] })
 	const navigate = useNavigate()
 	const location = useLocation()
 	const [dialogOpen, setDialogOpen] = useState(false)
@@ -380,13 +440,53 @@ export default function ProductsPage() {
 	const [detailOpen, setDetailOpen] = useState(false)
 	const [detailProduct, setDetailProduct] = useState<ProductoRecord | null>(null)
 	const [batchSubmitting, setBatchSubmitting] = useState(false)
+	const [pageSize, setPageSize] = useState<PageSizeOption>(() => {
+		try {
+			const raw = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY)
+			const parsed = Number(raw)
+			return (PAGE_SIZE_OPTIONS as readonly number[]).includes(parsed) ? (parsed as PageSizeOption) : DEFAULT_PAGE_SIZE
+		} catch {
+			return DEFAULT_PAGE_SIZE
+		}
+	})
+	const handleChangePageSize = (next: number) => {
+		if (!(PAGE_SIZE_OPTIONS as readonly number[]).includes(next)) return
+		setPageSize(next as PageSizeOption)
+		setCurrentPage(1)
+	}
 	const [batchRows, setBatchRows] = useState<BatchProductRow[]>(() => [createBlankBatchRow()])
 	const [batchRowSaveErrors, setBatchRowSaveErrors] = useState<Record<string, string>>({})
 	const [dialogExtraTakenCodes, setDialogExtraTakenCodes] = useState<string[]>([])
-	const [searchTerm, setSearchTerm] = useState("")
-	const [showAllProducts] = useState(false)
+	const [searchInput, setSearchInput] = useState("")
+	const debouncedSearchInput = useDebouncedValue(searchInput, 300)
 	const [currentPage, setCurrentPage] = useState(1)
-	const [activeCategory, setActiveCategory] = useState<"all" | ProductCategoryValue>("all")
+	const defaultFilters = useMemo<ProductsFilters>(
+		() => ({
+			categoria: "all",
+			proveedorId: "all",
+			stock: "all",
+			sales: "all",
+			margin: "all",
+			orden: "recent",
+		}),
+		[]
+	)
+	const [filters, setFilters] = useState<ProductsFilters>(() => ({ ...defaultFilters }))
+	const [filtersDraft, setFiltersDraft] = useState<ProductsFilters>(filters)
+	const [filtersOpen, setFiltersOpen] = useState(false)
+	const [viewMode, setViewMode] = useState<ProductsViewMode>(() => {
+		try {
+			const stored = window.localStorage.getItem("products:view")
+			return stored === "table" || stored === "cards" ? stored : "cards"
+		} catch {
+			return "cards"
+		}
+	})
+	const [exportDialogOpen, setExportDialogOpen] = useState(false)
+	const [exportScope, setExportScope] = useState<ExportScope>("page")
+	const [exportFormat, setExportFormat] = useState<"csv" | "xlsx" | "pdf">("csv")
+	const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "done" | "error">("idle")
+	const [exportError, setExportError] = useState<string | null>(null)
 	const [importState, setImportState] = useState<ImportState | null>(null)
 	const [importError, setImportError] = useState<string | null>(null)
 	const [importSubmitting, setImportSubmitting] = useState(false)
@@ -395,64 +495,22 @@ export default function ProductsPage() {
 	const [imageUploadError, setImageUploadError] = useState<string | null>(null)
 	const [imageProcessing, setImageProcessing] = useState(false)
 
-	const form = useForm<ProductoFormValues>({
-		resolver: zodResolver(productoSchema),
+	const form = useForm<ProductoModalFormValues>({
+		resolver: zodResolver(productoFormSchema),
 		defaultValues,
 	})
 
 	const watchedCategoria = form.watch("categoria")
 	const watchedImageUrl = form.watch("imagen_url")
 
-	const productosQuery = useQuery<ProductoRecord[]>({
-		queryKey: ["productos"],
-		enabled: isAdmin,
-		queryFn: async () => {
-			const { data } = await api.get<ProductoRecord[]>("/producto")
-			if (!Array.isArray(data)) return []
-			return data.map((item) => ({
-				...item,
-				precio_compra: Number(item.precio_compra ?? 0),
-				precio_venta: Number(item.precio_venta ?? 0),
-				cantidad_stock: Number(item.cantidad_stock ?? 0),
-				stock_minimo: Number(item.stock_minimo ?? 0),
-			}))
-		},
-	})
-
-	const proveedoresQuery = useQuery<ProveedorRecord[]>({
-		queryKey: ["proveedores"],
-		enabled: isAdmin,
-		queryFn: async () => {
-			const { data } = await api.get<ProveedorRecord[]>("/proveedor")
-			return Array.isArray(data) ? data : []
-		},
-	})
-
-	const imagenesQuery = useQuery<Record<number, string>>({
-		queryKey: ["product-images"],
-		enabled: isAdmin,
-		queryFn: async () => {
-			const { data } = await api.get<Record<string, string>>("/producto/imagen")
-			const normalized: Record<number, string> = {}
-			if (data && typeof data === "object") {
-				Object.entries(data).forEach(([key, value]) => {
-					const id = Number(key)
-					if (!Number.isNaN(id) && typeof value === "string" && value.trim().length > 0) {
-						normalized[id] = value
-					}
-				})
-			}
-			return normalized
-		},
-	})
+	const productosQuery = useProductsQuery(isAdmin)
+	const proveedoresQuery = useProvidersQuery(isAdmin)
+	const imagenesQuery = useProductImagesQuery(isAdmin)
 
 	const saveProductImage = useCallback(
 		async (productId: number, value: string | null) => {
-			await api.post("/producto/imagen", {
-				id_producto: productId,
-				imagen_url: value,
-			})
-			queryClient.invalidateQueries({ queryKey: ["product-images"] })
+			await productClient.saveImage(productId, value)
+			queryClient.invalidateQueries({ queryKey: ["productos-imagenes"] })
 		},
 		[queryClient]
 	)
@@ -505,10 +563,10 @@ export default function ProductsPage() {
 			nombre_producto: producto.nombre_producto,
 			descripcion: producto.descripcion ?? "",
 			imagen_url: cachedImage?.startsWith("data:") ? "" : cachedImage ?? "",
-			precio_compra: producto.precio_compra,
-			precio_venta: producto.precio_venta,
-			cantidad_stock: producto.cantidad_stock,
-			stock_minimo: producto.stock_minimo,
+			precio_compra: String(producto.precio_compra ?? 0),
+			precio_venta: String(producto.precio_venta ?? 0),
+			cantidad_stock: String(producto.cantidad_stock ?? 0),
+			stock_minimo: String(producto.stock_minimo ?? 0),
 			id_proveedor: producto.id_proveedor ? String(producto.id_proveedor) : "",
 		})
 		setDialogOpen(true)
@@ -518,6 +576,14 @@ export default function ProductsPage() {
 		setDetailProduct(producto)
 		setDetailOpen(true)
 	}
+
+	useEffect(() => {
+		try {
+			window.localStorage.setItem("products:view", viewMode)
+		} catch {
+			// ignore
+		}
+	}, [viewMode])
 
 	useEffect(() => {
 		if (!isAdmin) return
@@ -538,7 +604,7 @@ export default function ProductsPage() {
 
 	const updateMutation = useMutation({
 		mutationFn: ({ id, payload }: { id: number; payload: ProductoPayload; imageUrl: string | null }) =>
-			api.put(`/producto/${id}`, payload).then((res) => res.data),
+			productClient.update(id, payload),
 		onSuccess: async (data, variables) => {
 			try {
 				await saveProductImage(data.id_producto, variables.imageUrl)
@@ -555,7 +621,7 @@ export default function ProductsPage() {
 	})
 
 	const deleteMutation = useMutation({
-		mutationFn: (id: number) => api.delete(`/producto/${id}`),
+		mutationFn: (id: number) => productClient.remove(id),
 		onSuccess: async (_, id) => {
 			try {
 				await saveProductImage(id, null)
@@ -566,70 +632,180 @@ export default function ProductsPage() {
 		},
 	})
 
-	const productSalesQuery = useQuery<ProductSalesSummary>({
-		queryKey: ["producto-ventas", detailProduct?.id_producto ?? 0],
-		enabled: isAdmin && detailOpen && Boolean(detailProduct?.id_producto),
-		staleTime: 1000 * 30,
-		queryFn: async () => {
-			const productId = detailProduct?.id_producto
-			if (!productId) {
-				return { totalUnitsSold: 0, lastSaleDate: null, recentLines: [] }
-			}
-
-			const { data } = await api.get<VentaListRecord[]>("/ventas")
-			const ventas = Array.isArray(data) ? data : []
-			const ordered = [...ventas].sort(
-				(a, b) => new Date(b.fecha_factura).getTime() - new Date(a.fecha_factura).getTime()
-			)
-
-			let totalUnitsSold = 0
-			let lastSaleDate: string | null = null
-			const recentLines: ProductSaleLine[] = []
-
-			const concurrency = 6
-			for (let i = 0; i < ordered.length; i += concurrency) {
-				const chunk = ordered.slice(i, i + concurrency)
-				const details = await Promise.all(
-					chunk.map(async (venta) => {
-						try {
-							const res = await api.get<VentaDetailRecord>(`/ventas/${venta.id_factura}`)
-							return res.data
-						} catch {
-							return null
-						}
-					})
-				)
-
-				for (const ventaDetalle of details) {
-					if (!ventaDetalle) continue
-					const matches = ventaDetalle.detalle_factura.filter((d) => d.id_producto === productId)
-					if (matches.length === 0) continue
-					if (!lastSaleDate) lastSaleDate = ventaDetalle.fecha_factura
-					for (const detalle of matches) {
-						totalUnitsSold += detalle.cantidad
-						if (recentLines.length < 10) {
-							recentLines.push({
-								id_factura: ventaDetalle.id_factura,
-								numero_factura: ventaDetalle.numero_factura,
-								fecha_factura: ventaDetalle.fecha_factura,
-								cantidad: detalle.cantidad,
-								precio_unitario: detalle.precio_unitario,
-								subtotal: detalle.subtotal,
-							})
-						}
-					}
-				}
-			}
-
-			return { totalUnitsSold, lastSaleDate, recentLines }
-		},
-	})
+	const productSalesQuery = useProductSalesSummaryQuery(
+		detailProduct?.id_producto ?? 0,
+		isAdmin && detailOpen && Boolean(detailProduct?.id_producto)
+	)
+	const kardexQuery = useKardexQuery(isAdmin && detailOpen)
 
 	const productos = useMemo(() => productosQuery.data ?? [], [productosQuery.data])
 	const proveedores = useMemo(() => proveedoresQuery.data ?? [], [proveedoresQuery.data])
-	const lowStock = useMemo(() => productos.filter((p) => p.cantidad_stock <= p.stock_minimo), [productos])
-	const noProveedoresDisponibles = !proveedoresQuery.isLoading && proveedores.length === 0
+	const getCachedSalesStatus = useCallback(
+		(productId: number) => {
+			const summary = queryClient.getQueryData<ProductSalesSummary>(["producto-ventas", productId])
+			return resolveSalesStatus(summary)
+		},
+		[queryClient]
+	)
+	const getCachedSalesSummary = useCallback(
+		(productId: number) => {
+			return queryClient.getQueryData<ProductSalesSummary>(["producto-ventas", productId]) ?? null
+		},
+		[queryClient]
+	)
+
+	useEffect(() => {
+		try {
+			window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize))
+		} catch {
+			// noop
+		}
+	}, [pageSize])
+
+	const kpiStockCritico = useMemo(() => {
+		return productos.filter((p) => {
+			const status = resolveProductStockStatus(p)
+			return status === "CRITICAL" || status === "SIN_STOCK"
+		}).length
+	}, [productos])
+
+	const kpiNoSales30d = useMemo(() => {
+		return productos.filter((p) => getCachedSalesStatus(p.id_producto) === "NO_SALES_30D").length
+	}, [productos, getCachedSalesStatus, salesQueriesVersion])
+
+	const kpiLowMargin = useMemo(() => {
+		return productos.filter((p) => resolveMarginStatus(p) === "LOW_MARGIN").length
+	}, [productos])
+	const proveedoresNoDisponibles = proveedoresQuery.isError
+	const noProveedoresDisponibles = !proveedoresQuery.isLoading && !proveedoresNoDisponibles && proveedores.length === 0
 	const isMutating = updateMutation.isPending
+
+	const openFilters = () => {
+		setFiltersDraft(filters)
+		setFiltersOpen(true)
+	}
+
+	const applyFilters = () => {
+		setFilters(filtersDraft)
+		setFiltersOpen(false)
+	}
+
+	const clearAllFilters = () => {
+		setFilters({ ...defaultFilters })
+	}
+
+	const categoryLabel = useMemo(() => {
+		if (filters.categoria === "all") return "Todas"
+		return productCategories.find((c) => c.value === filters.categoria)?.label ?? "Categoría"
+	}, [filters.categoria])
+
+	const providerLabel = useMemo(() => {
+		if (filters.proveedorId === "all") return "Todos"
+		const match = proveedores.find((p) => p.id_proveedor === filters.proveedorId)
+		return match?.nombre_proveedor ?? "Proveedor"
+	}, [filters.proveedorId, proveedores])
+
+	const stockLabel = useMemo(() => {
+		switch (filters.stock) {
+			case "CRITICAL":
+				return "Crítico"
+			case "LOW":
+				return "Bajo"
+			case "NORMAL":
+				return "Normal"
+			case "SIN_STOCK":
+				return "Sin stock"
+			default:
+				return "Todos"
+		}
+	}, [filters.stock])
+
+	const salesLabel = useMemo(() => {
+		switch (filters.sales) {
+			case "ACTIVE":
+				return "Activas"
+			case "NO_SALES_30D":
+				return "Sin ventas 30d"
+			default:
+				return "Todas"
+		}
+	}, [filters.sales])
+
+	const marginLabel = useMemo(() => {
+		switch (filters.margin) {
+			case "OK":
+				return "OK"
+			case "LOW_MARGIN":
+				return "Margen bajo"
+			case "NO_COST":
+				return "Sin costo"
+			default:
+				return "Todos"
+		}
+	}, [filters.margin])
+
+	const sortLabel = useMemo(() => {
+		switch (filters.orden) {
+			case "name_asc":
+				return "Nombre A-Z"
+			case "name_desc":
+				return "Nombre Z-A"
+			case "stock_asc":
+				return "Stock asc"
+			case "stock_desc":
+				return "Stock desc"
+			case "price_asc":
+				return "Precio asc"
+			case "price_desc":
+				return "Precio desc"
+			case "margin_asc":
+				return "Margen asc"
+			case "margin_desc":
+				return "Margen desc"
+			case "status_stock":
+				return "Estado stock"
+			case "status_sales":
+				return "Estado ventas"
+			case "status_margin":
+				return "Estado margen"
+			default:
+				return "Más recientes"
+		}
+	}, [filters.orden])
+
+	const filterChips = useMemo(() => {
+		const chips: Array<{ key: "categoria" | "proveedor" | "stock" | "sales" | "margin" | "orden"; label: string }> = []
+		if (filters.categoria !== "all") chips.push({ key: "categoria", label: `Categoría: ${categoryLabel}` })
+		if (filters.proveedorId !== "all") chips.push({ key: "proveedor", label: `Proveedor: ${providerLabel}` })
+		if (filters.stock !== "all") chips.push({ key: "stock", label: `Stock: ${stockLabel}` })
+		if (filters.sales !== "all") chips.push({ key: "sales", label: `Ventas: ${salesLabel}` })
+		if (filters.margin !== "all") chips.push({ key: "margin", label: `Margen: ${marginLabel}` })
+		if (filters.orden !== "recent") chips.push({ key: "orden", label: `Ordenar: ${sortLabel}` })
+		return chips
+	}, [filters, categoryLabel, providerLabel, stockLabel, salesLabel, marginLabel, sortLabel])
+
+	const removeChip = (key: (typeof filterChips)[number]["key"]) => {
+		switch (key) {
+			case "categoria":
+				setFilters((prev) => ({ ...prev, categoria: "all" }))
+				break
+			case "proveedor":
+				setFilters((prev) => ({ ...prev, proveedorId: "all" }))
+				break
+			case "stock":
+				setFilters((prev) => ({ ...prev, stock: "all" }))
+				break
+			case "sales":
+				setFilters((prev) => ({ ...prev, sales: "all" }))
+				break
+			case "margin":
+				setFilters((prev) => ({ ...prev, margin: "all" }))
+				break
+			case "orden":
+				setFilters((prev) => ({ ...prev, orden: "recent" }))
+				break
+		}
+	}
 
 	const urlPreview = useMemo(() => {
 		const trimmed = watchedImageUrl?.trim()
@@ -788,7 +964,7 @@ export default function ProductsPage() {
 					stock_minimo: row.stock_minimo,
 				}
 
-				const { data } = await api.post<ProductoRecord>("/producto", payload)
+				const data = await productClient.create(payload)
 				await saveProductImage(data.id_producto, null)
 				success += 1
 				createdCodes.push(codigo.toUpperCase())
@@ -822,28 +998,130 @@ export default function ProductsPage() {
 		closeDialog()
 	}
 
+	const normalizedSearch = useMemo(() => debouncedSearchInput.trim().toLowerCase(), [debouncedSearchInput])
+
 	const filteredProducts = useMemo(() => {
-		const value = searchTerm.trim().toLowerCase()
-		const byText = !value
-			? productos
-			: productos.filter(
-					(producto) =>
-						producto.nombre_producto.toLowerCase().includes(value) || producto.codigo_producto.toLowerCase().includes(value)
-				)
+		let result = productos
 
-		if (activeCategory === "all") return byText
-		return byText.filter((producto) => inferCategoryFromCode(producto.codigo_producto) === activeCategory)
-	}, [productos, searchTerm, activeCategory])
+		if (normalizedSearch) {
+			result = result.filter(
+				(producto) =>
+					producto.nombre_producto.toLowerCase().includes(normalizedSearch) ||
+					producto.codigo_producto.toLowerCase().includes(normalizedSearch)
+			)
+		}
 
-	const isPagedView = showAllProducts || searchTerm.trim().length > 0
-	const pageSize = isPagedView ? EXPANDED_PAGE_SIZE : MAX_VISIBLE_PRODUCTS
+		if (filters.categoria !== "all") {
+			result = result.filter((producto) => inferCategoryFromCode(producto.codigo_producto) === filters.categoria)
+		}
+
+		if (filters.proveedorId !== "all") {
+			result = result.filter((producto) => producto.id_proveedor === filters.proveedorId)
+		}
+
+		result = result.filter((producto) => matchesStockFilter(producto, filters.stock))
+
+		if (filters.sales !== "all") {
+			result = result.filter((producto) => matchesSalesFilter(getCachedSalesStatus(producto.id_producto), filters.sales))
+		}
+
+		result = result.filter((producto) => matchesMarginFilter(producto, filters.margin))
+
+		const sorted = [...result]
+		sorted.sort((a, b) => {
+			switch (filters.orden) {
+				case "name_asc":
+					return a.nombre_producto.localeCompare(b.nombre_producto, "es")
+				case "name_desc":
+					return b.nombre_producto.localeCompare(a.nombre_producto, "es")
+				case "stock_asc":
+					return a.cantidad_stock - b.cantidad_stock
+				case "stock_desc":
+					return b.cantidad_stock - a.cantidad_stock
+				case "price_asc":
+					return a.precio_venta - b.precio_venta
+				case "price_desc":
+					return b.precio_venta - a.precio_venta
+				case "margin_asc": {
+					const ma = computeMarginPercent(a.precio_compra, a.precio_venta)
+					const mb = computeMarginPercent(b.precio_compra, b.precio_venta)
+					const va = ma === null ? Number.POSITIVE_INFINITY : ma
+					const vb = mb === null ? Number.POSITIVE_INFINITY : mb
+					return va - vb
+				}
+				case "margin_desc": {
+					const ma = computeMarginPercent(a.precio_compra, a.precio_venta)
+					const mb = computeMarginPercent(b.precio_compra, b.precio_venta)
+					const va = ma === null ? Number.NEGATIVE_INFINITY : ma
+					const vb = mb === null ? Number.NEGATIVE_INFINITY : mb
+					return vb - va
+				}
+				case "status_stock":
+					return stockStatusWeight(resolveProductStockStatus(a)) - stockStatusWeight(resolveProductStockStatus(b))
+				case "status_sales":
+					return salesStatusWeight(getCachedSalesStatus(a.id_producto)) - salesStatusWeight(getCachedSalesStatus(b.id_producto))
+				case "status_margin":
+					return marginStatusWeight(resolveMarginStatus(a)) - marginStatusWeight(resolveMarginStatus(b))
+				case "recent":
+				default:
+					return b.id_producto - a.id_producto
+			}
+		})
+
+		return sorted
+	}, [productos, normalizedSearch, filters, getCachedSalesStatus, salesQueriesVersion])
+
+	const sortedAllProducts = useMemo(() => {
+		const sorted = [...productos]
+		sorted.sort((a, b) => {
+			switch (filters.orden) {
+				case "name_asc":
+					return a.nombre_producto.localeCompare(b.nombre_producto, "es")
+				case "name_desc":
+					return b.nombre_producto.localeCompare(a.nombre_producto, "es")
+				case "stock_asc":
+					return a.cantidad_stock - b.cantidad_stock
+				case "stock_desc":
+					return b.cantidad_stock - a.cantidad_stock
+				case "price_asc":
+					return a.precio_venta - b.precio_venta
+				case "price_desc":
+					return b.precio_venta - a.precio_venta
+				case "margin_asc": {
+					const ma = computeMarginPercent(a.precio_compra, a.precio_venta)
+					const mb = computeMarginPercent(b.precio_compra, b.precio_venta)
+					const va = ma === null ? Number.POSITIVE_INFINITY : ma
+					const vb = mb === null ? Number.POSITIVE_INFINITY : mb
+					return va - vb
+				}
+				case "margin_desc": {
+					const ma = computeMarginPercent(a.precio_compra, a.precio_venta)
+					const mb = computeMarginPercent(b.precio_compra, b.precio_venta)
+					const va = ma === null ? Number.NEGATIVE_INFINITY : ma
+					const vb = mb === null ? Number.NEGATIVE_INFINITY : mb
+					return vb - va
+				}
+				case "status_stock":
+					return stockStatusWeight(resolveProductStockStatus(a)) - stockStatusWeight(resolveProductStockStatus(b))
+				case "status_sales":
+					return salesStatusWeight(getCachedSalesStatus(a.id_producto)) - salesStatusWeight(getCachedSalesStatus(b.id_producto))
+				case "status_margin":
+					return marginStatusWeight(resolveMarginStatus(a)) - marginStatusWeight(resolveMarginStatus(b))
+				case "recent":
+				default:
+					return b.id_producto - a.id_producto
+			}
+		})
+		return sorted
+	}, [productos, filters.orden, getCachedSalesStatus, salesQueriesVersion])
+
 	const totalPages = useMemo(() => {
 		return Math.max(1, Math.ceil(filteredProducts.length / pageSize))
 	}, [filteredProducts.length, pageSize])
 
 	useEffect(() => {
 		setCurrentPage(1)
-	}, [searchTerm, activeCategory, showAllProducts])
+	}, [normalizedSearch, filters])
 
 	useEffect(() => {
 		setCurrentPage((page) => Math.min(page, totalPages))
@@ -857,19 +1135,116 @@ export default function ProductsPage() {
 		return filteredProducts.slice(startIndex, startIndex + pageSize)
 	}, [filteredProducts, currentPage, pageSize])
 
+	const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+	const [deleteTarget, setDeleteTarget] = useState<ProductoRecord | null>(null)
+
 	const handleDelete = (producto: ProductoRecord) => {
 		if (deleteMutation.isPending) return
-		const confirmed = window.confirm(
-			`¿Seguro que deseas eliminar ${producto.nombre_producto}? Esta acción es permanente.`
+		setDeleteTarget(producto)
+		setDeleteConfirmOpen(true)
+	}
+
+	const openStockAdjust = (producto: ProductoRecord) => {
+		openEdit(producto)
+		window.setTimeout(() => {
+			form.setFocus("cantidad_stock")
+		}, 50)
+	}
+
+	const ProductActionsMenu = ({ producto }: { producto: ProductoRecord }) => {
+		const menu = useFloatingMenu()
+		return (
+			<div ref={menu.ref} className="relative">
+				<button
+					type="button"
+					onClick={(event) => {
+						event.stopPropagation()
+						menu.setOpen((prev) => !prev)
+					}}
+					className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+					aria-label="Acciones"
+				>
+					⋯
+				</button>
+				{menu.open && (
+					<div className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+						<button
+							type="button"
+							onClick={(event) => {
+								event.stopPropagation()
+								navigate("/ventas")
+								menu.setOpen(false)
+							}}
+							className="flex w-full px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+						>
+							Historial
+						</button>
+						<button
+							type="button"
+							onClick={(event) => {
+								event.stopPropagation()
+								handleDelete(producto)
+								menu.setOpen(false)
+							}}
+							disabled={deleteMutation.isPending}
+							className="flex w-full px-4 py-3 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+						>
+							Eliminar
+						</button>
+					</div>
+				)}
+			</div>
 		)
-		if (confirmed) {
-			deleteMutation.mutate(producto.id_producto)
+	}
+
+	const parseNonNegativeFloat = (raw: string) => {
+		const normalized = raw.trim()
+		if (!normalized) return { ok: false as const, message: "Ingresa un valor" }
+		const maybe = normalized.includes(",") && !normalized.includes(".") ? normalized.replace(",", ".") : normalized
+		const parsed = parseFloat(maybe)
+		if (Number.isNaN(parsed)) return { ok: false as const, message: "Ingresa un número válido" }
+		if (parsed < 0) return { ok: false as const, message: "No puede ser negativo" }
+		return { ok: true as const, value: parsed }
+	}
+
+	const parseNonNegativeInt = (raw: string) => {
+		const normalized = raw.trim()
+		if (!normalized) return { ok: false as const, message: "Ingresa un valor" }
+		if (normalized.includes(".") || normalized.includes(",")) {
+			return { ok: false as const, message: "Debe ser entero" }
 		}
+		const parsed = parseInt(normalized, 10)
+		if (Number.isNaN(parsed)) return { ok: false as const, message: "Ingresa un número válido" }
+		if (parsed < 0) return { ok: false as const, message: "No puede ser negativo" }
+		return { ok: true as const, value: parsed }
 	}
 
 	const onSubmit = form.handleSubmit((values) => {
 		if (!editingProduct) return
 		setFormError(null)
+		form.clearErrors(["precio_compra", "precio_venta", "cantidad_stock", "stock_minimo"])
+
+		const precioCompraParsed = parseNonNegativeFloat(values.precio_compra)
+		if (!precioCompraParsed.ok) {
+			form.setError("precio_compra", { type: "manual", message: precioCompraParsed.message })
+			return
+		}
+		const precioVentaParsed = parseNonNegativeFloat(values.precio_venta)
+		if (!precioVentaParsed.ok) {
+			form.setError("precio_venta", { type: "manual", message: precioVentaParsed.message })
+			return
+		}
+		const stockParsed = parseNonNegativeInt(values.cantidad_stock)
+		if (!stockParsed.ok) {
+			form.setError("cantidad_stock", { type: "manual", message: stockParsed.message })
+			return
+		}
+		const stockMinParsed = parseNonNegativeInt(values.stock_minimo)
+		if (!stockMinParsed.ok) {
+			form.setError("stock_minimo", { type: "manual", message: stockMinParsed.message })
+			return
+		}
+
 		const imageValue = imageMode === "upload" ? uploadedPreview : values.imagen_url?.trim()
 		const proveedorId = Number(values.id_proveedor)
 
@@ -878,10 +1253,10 @@ export default function ProductsPage() {
 			nombre_producto: values.nombre_producto.trim(),
 			descripcion: values.descripcion?.trim() ? values.descripcion.trim() : null,
 			id_proveedor: proveedorId,
-			precio_compra: values.precio_compra,
-			precio_venta: values.precio_venta,
-			cantidad_stock: values.cantidad_stock,
-			stock_minimo: values.stock_minimo,
+			precio_compra: precioCompraParsed.value,
+			precio_venta: precioVentaParsed.value,
+			cantidad_stock: stockParsed.value,
+			stock_minimo: stockMinParsed.value,
 		}
 
 		updateMutation.mutate({ id: editingProduct.id_producto, payload, imageUrl: imageValue ?? null })
@@ -1052,7 +1427,7 @@ export default function ProductsPage() {
 					cantidad_stock: row.data.cantidad_stock,
 					stock_minimo: row.data.stock_minimo,
 				}
-				const { data } = await api.post<ProductoRecord>("/producto", payload)
+				const data = await productClient.create(payload)
 				localTaken.add(codigo.toUpperCase())
 				await saveProductImage(data.id_producto, null)
 				success += 1
@@ -1074,33 +1449,45 @@ export default function ProductsPage() {
 		}
 	}
 
-	const handleExport = (format: "excel" | "csv" | "pdf") => {
-		const rows = buildExportRows(filteredProducts)
-		if (rows.length === 0) return
-		const filenameBase = `productos_${formatDateStamp()}`
-		if (format === "excel") {
-			const worksheet = XLSX.utils.json_to_sheet(rows)
-			const workbook = XLSX.utils.book_new()
-			XLSX.utils.book_append_sheet(workbook, worksheet, "Productos")
-			XLSX.writeFile(workbook, `${filenameBase}.xlsx`)
-		} else if (format === "csv") {
-			const worksheet = XLSX.utils.json_to_sheet(rows)
-			const csv = XLSX.utils.sheet_to_csv(worksheet)
-			const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-			const url = URL.createObjectURL(blob)
-			const link = document.createElement("a")
-			link.href = url
-			link.download = `${filenameBase}.csv`
-			link.click()
-			URL.revokeObjectURL(url)
-		} else {
-			const doc = new jsPDF({ orientation: "landscape" })
-			autoTable(doc, {
-				head: [Object.keys(rows[0])],
-				body: rows.map((row) => Object.values(row)),
-				styles: { fontSize: 8 },
-			})
-			doc.save(`${filenameBase}.pdf`)
+	const getSourceForExport = async (scope: ExportScope) => {
+		if (scope === "page") return displayedProducts
+		if (scope === "filtered") return filteredProducts
+		// all
+		if (productosQuery.data) return sortedAllProducts
+		const fetched = await queryClient.fetchQuery({ queryKey: productsQueryKey, queryFn: () => productClient.list() })
+		return fetched ?? []
+	}
+
+	const runExport = async (): Promise<boolean> => {
+		setExportError(null)
+		setExportStatus("exporting")
+		try {
+			const source = await getSourceForExport(exportScope)
+			const rows = buildExportRows(source, (id) => getCachedSalesSummary(id))
+			const fileRows = rows as unknown as ExportFileRow[]
+			if (fileRows.length === 0) {
+				setExportError("No hay productos para exportar")
+				setExportStatus("idle")
+				return false
+			}
+			const filenameBase = `productos_${exportScope}_${formatDateStamp()}`
+			switch (exportFormat) {
+				case "csv":
+					exportToCSV(fileRows, filenameBase)
+					break
+				case "xlsx":
+					exportToXLSX(fileRows, filenameBase)
+					break
+				case "pdf":
+					exportToPDF(fileRows, filenameBase)
+					break
+			}
+			setExportStatus("done")
+			return true
+		} catch (error) {
+			setExportError(getApiErrorMessage(error, "No se pudo exportar"))
+			setExportStatus("error")
+			return false
 		}
 	}
 
@@ -1137,16 +1524,18 @@ export default function ProductsPage() {
 						<div className="flex flex-wrap items-center justify-end gap-2">
 							<button
 								onClick={() => openCreate("single")}
-								disabled={noProveedoresDisponibles}
+								disabled={noProveedoresDisponibles || proveedoresNoDisponibles}
 								className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
 							>
 								<Plus className="h-4 w-4" />
 								Registrar productos
 							</button>
 					</div>
-					{noProveedoresDisponibles && (
-						<p className="text-xs text-amber-700">Crea un proveedor para habilitar este módulo.</p>
-					)}
+						{proveedoresNoDisponibles ? (
+							<p className="text-xs text-amber-700">No se pudieron cargar proveedores. Intenta nuevamente.</p>
+						) : noProveedoresDisponibles ? (
+							<p className="text-xs text-amber-700">Crea un proveedor para habilitar este módulo.</p>
+						) : null}
 					</div>
 				</div>
 			</section>
@@ -1157,26 +1546,75 @@ export default function ProductsPage() {
 						Resumen
 					</p>
 				</div>
-				<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-				<article className="rounded-2xl border border-slate-200 bg-white p-5">
-					<p className="text-xs uppercase text-slate-500">Total registrados</p>
-					<p className="mt-2 text-3xl font-semibold text-slate-900">{productos.length}</p>
-					<p className="text-sm text-slate-500">Productos activos según Prisma</p>
-				</article>
-				<article className="rounded-2xl border border-slate-200 bg-white p-5">
-					<p className="text-xs uppercase text-slate-500">Stock crítico</p>
-					<p className="mt-2 text-3xl font-semibold text-amber-600">{lowStock.length}</p>
-					<p className="text-sm text-slate-500">Cantidad con stock ≤ mínimo</p>
-				</article>
-				<article className="rounded-2xl border border-slate-200 bg-white p-5">
-					<p className="text-xs uppercase text-slate-500">Proveedores activos</p>
-					<p className="mt-2 text-3xl font-semibold text-slate-900">{proveedores.length}</p>
-					<p className="text-sm text-slate-500">Fuente para nuevas compras</p>
-				</article>
+				<div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+					<article
+						role="button"
+						tabIndex={0}
+						onClick={() => setFilters({ ...defaultFilters })}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" || event.key === " ") {
+								event.preventDefault()
+								setFilters({ ...defaultFilters })
+							}
+						}}
+						className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+					>
+						<p className="text-xs uppercase text-slate-500">Total productos</p>
+						<p className="mt-2 text-3xl font-semibold text-slate-900">{productos.length}</p>
+						<p className="text-sm text-slate-500">Registrados en inventario</p>
+					</article>
+					<article
+						role="button"
+						tabIndex={0}
+						onClick={() => setFilters((prev) => ({ ...prev, stock: "CRITICAL" }))}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" || event.key === " ") {
+								event.preventDefault()
+								setFilters((prev) => ({ ...prev, stock: "CRITICAL" }))
+							}
+						}}
+						className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+					>
+						<p className="text-xs uppercase text-slate-500">Stock crítico</p>
+						<p className="mt-2 text-3xl font-semibold text-amber-600">{kpiStockCritico}</p>
+						<p className="text-sm text-slate-500">Incluye sin stock</p>
+					</article>
+					<article
+						role="button"
+						tabIndex={0}
+						onClick={() => setFilters((prev) => ({ ...prev, sales: "NO_SALES_30D" }))}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" || event.key === " ") {
+								event.preventDefault()
+								setFilters((prev) => ({ ...prev, sales: "NO_SALES_30D" }))
+							}
+						}}
+						className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+					>
+						<p className="text-xs uppercase text-slate-500">Sin ventas 30d</p>
+						<p className="mt-2 text-3xl font-semibold text-slate-900">{kpiNoSales30d}</p>
+						<p className="text-sm text-slate-500">Según historial disponible</p>
+					</article>
+					<article
+						role="button"
+						tabIndex={0}
+						onClick={() => setFilters((prev) => ({ ...prev, margin: "LOW_MARGIN" }))}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" || event.key === " ") {
+								event.preventDefault()
+								setFilters((prev) => ({ ...prev, margin: "LOW_MARGIN" }))
+							}
+						}}
+						className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+					>
+						<p className="text-xs uppercase text-slate-500">Margen bajo</p>
+						<p className="mt-2 text-3xl font-semibold text-amber-600">{kpiLowMargin}</p>
+						<p className="text-sm text-slate-500">Bajo umbral por defecto</p>
+					</article>
 				</div>
 			</section>
 
-			{(productosQuery.isError || proveedoresQuery.isError) && (
+			{productosQuery.isError && (
 				<div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
 					<div className="flex items-center gap-2 font-medium">
 						<AlertCircle className="h-4 w-4" />
@@ -1185,181 +1623,515 @@ export default function ProductsPage() {
 				</div>
 			)}
 
-			<section aria-labelledby="productos-acciones" className="space-y-3">
-				<p id="productos-acciones" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-					Acciones
-				</p>
-				<div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
-					<div>
-						<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-							<label className="text-xs font-semibold uppercase text-slate-500">Buscar producto</label>
-							<input
-								value={searchTerm}
-								onChange={(event) => setSearchTerm(event.target.value)}
-								placeholder="Nombre o código"
-								className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-							/>
-							<p className="mt-1 text-xs text-slate-500">
+
+			<section aria-labelledby="productos-listado" className="rounded-2xl border border-slate-200 bg-white">
+				<ProductsListHeader
+					startItem={startItem}
+					endItem={endItem}
+					resultsCount={filteredProducts.length}
+					searchInput={searchInput}
+					onSearchInputChange={setSearchInput}
+					onOpenFilters={openFilters}
+					viewMode={viewMode}
+					onChangeViewMode={setViewMode}
+					pageSize={pageSize}
+					onChangePageSize={handleChangePageSize}
+					onOpenCreate={() => openCreate("single")}
+					createDisabled={noProveedoresDisponibles}
+					onOpenExport={() => {
+						setExportStatus("idle")
+						setExportError(null)
+						setExportDialogOpen(true)
+					}}
+					filterChips={filterChips}
+					onRemoveChip={removeChip}
+					onClearAllFilters={clearAllFilters}
+				/>
+
+				<Dialog
+					open={exportDialogOpen}
+					onOpenChange={(open) => {
+						// Bloqueado: solo cerrar con botones del modal.
+						if (!open) return
+						setExportDialogOpen(true)
+					}}
+				>
+					<DialogContent className="max-w-3xl" disableOutsideClose hideCloseButton>
+						<DialogHeader>
+							<DialogTitle>Exportar productos</DialogTitle>
+							<DialogDescription>Selecciona el alcance y el formato de exportación.</DialogDescription>
+						</DialogHeader>
+
+						<div className="grid gap-6 md:grid-cols-2">
+							<div className="grid gap-3">
+								<p className="text-sm font-semibold text-slate-900">Alcance</p>
+								<div className="grid gap-2">
+									<label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 hover:bg-slate-50">
+										<input
+											type="radio"
+											name="export-scope"
+											checked={exportScope === "page"}
+											onChange={() => setExportScope("page")}
+											className="mt-1"
+										/>
+										<div>
+											<p className="text-sm font-semibold text-slate-900">Página actual</p>
+											<p className="text-xs text-slate-500">Lo visible en pantalla según la paginación actual.</p>
+										</div>
+									</label>
+									<label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 hover:bg-slate-50">
+										<input
+											type="radio"
+											name="export-scope"
+											checked={exportScope === "filtered"}
+											onChange={() => setExportScope("filtered")}
+											className="mt-1"
+										/>
+										<div>
+											<p className="text-sm font-semibold text-slate-900">Filtrados</p>
+											<p className="text-xs text-slate-500">Aplica búsqueda + filtros + orden, sin importar página.</p>
+										</div>
+									</label>
+									<label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 hover:bg-slate-50">
+										<input
+											type="radio"
+											name="export-scope"
+											checked={exportScope === "all"}
+											onChange={() => setExportScope("all")}
+											className="mt-1"
+										/>
+										<div>
+											<p className="text-sm font-semibold text-slate-900">Todo</p>
+											<p className="text-xs text-slate-500">Ignora filtros y exporta todos los productos.</p>
+										</div>
+									</label>
+								</div>
+							</div>
+
+							<div className="grid gap-3">
+								<p className="text-sm font-semibold text-slate-900">Formato</p>
+								<div className="grid gap-2">
+									<label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 hover:bg-slate-50">
+										<input
+											type="radio"
+											name="export-format"
+											checked={exportFormat === "csv"}
+											onChange={() => setExportFormat("csv")}
+											className="mt-1"
+										/>
+										<div>
+											<p className="text-sm font-semibold text-slate-900">CSV</p>
+											<p className="text-xs text-slate-500">Compatible con Excel (separador ;).</p>
+										</div>
+									</label>
+									<label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 hover:bg-slate-50">
+										<input
+											type="radio"
+											name="export-format"
+											checked={exportFormat === "xlsx"}
+											onChange={() => setExportFormat("xlsx")}
+											className="mt-1"
+										/>
+										<div>
+											<p className="text-sm font-semibold text-slate-900">Excel (.xlsx)</p>
+											<p className="text-xs text-slate-500">Hoja "Productos" con columnas formateadas.</p>
+										</div>
+									</label>
+									<label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-slate-900 hover:bg-slate-50">
+										<input
+											type="radio"
+											name="export-format"
+											checked={exportFormat === "pdf"}
+											onChange={() => setExportFormat("pdf")}
+											className="mt-1"
+										/>
+										<div>
+											<p className="text-sm font-semibold text-slate-900">PDF</p>
+											<p className="text-xs text-slate-500">Tabla en PDF (landscape).</p>
+										</div>
+									</label>
+								</div>
+							</div>
+						</div>
+
+						{exportError && (
+							<div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{exportError}</div>
+						)}
+
+						<DialogFooter>
+							<button
+								type="button"
+								onClick={() => {
+									if (exportStatus === "exporting") return
+									setExportDialogOpen(false)
+								}}
+								disabled={exportStatus === "exporting"}
+								className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								Cancelar
+							</button>
+							<button
+								type="button"
+								onClick={async () => {
+									const ok = await runExport()
+									if (ok) setExportDialogOpen(false)
+								}}
+								disabled={exportStatus === "exporting"}
+								className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								{exportStatus === "exporting" ? "Exportando…" : exportStatus === "done" ? "Listo" : "Aceptar"}
+							</button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+				<div className="hidden px-6 py-4">
+					<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+						<div>
+							<p id="productos-listado" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+								Listado
+							</p>
+							<p className="mt-1 text-sm font-semibold text-slate-900">Productos</p>
+							<p className="text-xs text-slate-500">
 								Mostrando {startItem}-{endItem} de {filteredProducts.length} resultados.
 							</p>
 						</div>
-					</div>
-					<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-						<p className="text-xs font-semibold uppercase text-slate-500">Exportar</p>
-						<div className="mt-3 flex flex-wrap items-center gap-2">
+
+						<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+							<input
+								value={searchInput}
+								onChange={(event) => setSearchInput(event.target.value)}
+								placeholder="Buscar por código o nombre"
+								className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 sm:w-72"
+							/>
+
 							<button
-								onClick={() => handleExport("excel")}
-								className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+								type="button"
+								onClick={openFilters}
+								className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
 							>
-								<Download className="h-4 w-4" /> Excel
+								Filtros
 							</button>
+
+							<div className="inline-flex overflow-hidden rounded-2xl border border-slate-200 bg-white">
+								<button
+									type="button"
+									onClick={() => setViewMode("table")}
+									className={
+										"px-4 py-2.5 text-sm font-semibold transition " +
+										(viewMode === "table" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50")
+									}
+								>
+									Tabla
+								</button>
+								<button
+									type="button"
+									onClick={() => setViewMode("cards")}
+									className={
+										"px-4 py-2.5 text-sm font-semibold transition " +
+										(viewMode === "cards" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50")
+									}
+								>
+									Cards
+								</button>
+							</div>
+
 							<button
-								onClick={() => handleExport("csv")}
-								className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+								type="button"
+								onClick={() => openCreate("single")}
+								disabled={noProveedoresDisponibles}
+								className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
 							>
-								<FileDown className="h-4 w-4" /> CSV
+								Registrar
 							</button>
+
 							<button
-								onClick={() => handleExport("pdf")}
-								className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+								type="button"
+								onClick={() => {
+								setExportStatus("idle")
+								setExportError(null)
+								setExportDialogOpen(true)
+							}}
+								className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
 							>
-								<Sparkles className="h-4 w-4" /> PDF
+								Exportar
 							</button>
 						</div>
 					</div>
-				</div>
-			</section>
 
-			<section aria-labelledby="productos-listado" className="rounded-2xl border border-slate-200 bg-white">
-				<div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
-					<div>
-						<p id="productos-listado" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-							Listado
-						</p>
-						<p className="mt-1 text-sm font-semibold text-slate-900">
-							{activeCategory === "all"
-								? "Todos los productos"
-								: productCategories.find((c) => c.value === activeCategory)?.label ?? "Categoría"}
-						</p>
-						<p className="text-xs text-slate-500">{filteredProducts.length} resultados</p>
-					</div>
+					{filterChips.length > 0 && (
+						<div className="mt-4 flex flex-wrap items-center gap-2">
+							{filterChips.map((chip) => (
+								<span
+									key={chip.key}
+									className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"
+								>
+									{chip.label}
+									<button
+										type="button"
+										onClick={() => removeChip(chip.key)}
+										className="rounded-full px-1 text-slate-500 hover:text-slate-900"
+										aria-label="Remover filtro"
+									>
+										×
+									</button>
+								</span>
+							))}
+							<button
+								type="button"
+								onClick={clearAllFilters}
+								className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+							>
+								Limpiar todo
+							</button>
+						</div>
+					)}
 				</div>
+
 				<div className="px-6 pb-6">
-					<div className="pt-4">
-						<div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-							<div className="w-full sm:max-w-xs">
-								<label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Categoría</label>
-								<select
-									value={activeCategory}
-									onChange={(event) => {
-										setActiveCategory(event.target.value as "all" | ProductCategoryValue)
-									}}
-									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-								>
-									<option value="all">Todos los productos</option>
-									{productCategories.map((category) => (
-										<option key={category.value} value={category.value}>
-											{category.label}
-										</option>
-									))}
-								</select>
-							</div>
-							<div className="text-xs text-slate-500">
-								Mostrando {startItem}-{endItem} de {filteredProducts.length}
-							</div>
-						</div>
-					</div>
 
-					<div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-						{displayedProducts.map((producto) => {
-							const critical = producto.cantidad_stock <= producto.stock_minimo
-							const inferred = inferCategoryFromCode(producto.codigo_producto)
-							return (
-								<div
-									key={producto.id_producto}
-									role="button"
-									tabIndex={0}
-									aria-label={`Ver detalle de ${producto.nombre_producto}`}
-									onClick={() => openDetail(producto)}
-									onKeyDown={(event) => {
-										if (event.key === "Enter" || event.key === " ") {
-											event.preventDefault()
-											openDetail(producto)
-										}
+					{viewMode === "cards" ? (
+						<div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+							{displayedProducts.map((producto) => {
+								const stockStatus = resolveProductStockStatus(producto)
+								const stockStatusText = productStockStatusLabel(stockStatus)
+								const salesStatus = getCachedSalesStatus(producto.id_producto)
+								const marginStatus = resolveMarginStatus(producto)
+								const inferred = inferCategoryFromCode(producto.codigo_producto)
+								const purchaseDisplay = producto.precio_compra > 0 ? currency.format(producto.precio_compra) : "—"
+								const margin = computeMargin(producto.precio_compra, producto.precio_venta)
+								const stockStatusClass =
+									stockStatus === "SIN_STOCK"
+										? "bg-slate-100 text-slate-700"
+										: stockStatus === "CRITICAL"
+											? "bg-red-50 text-red-700"
+											: stockStatus === "LOW"
+												? "bg-amber-50 text-amber-700"
+												: "bg-emerald-50 text-emerald-700"
+								const salesStatusClass =
+									salesStatus === null
+										? "bg-slate-100 text-slate-700"
+										: salesStatus === "NO_SALES_30D"
+											? "bg-amber-50 text-amber-700"
+											: "bg-emerald-50 text-emerald-700"
+								const marginStatusClass =
+									marginStatus === "NO_COST"
+										? "bg-slate-100 text-slate-700"
+										: marginStatus === "LOW_MARGIN"
+											? "bg-amber-50 text-amber-700"
+											: "bg-emerald-50 text-emerald-700"
+
+								return (
+									<div
+										key={producto.id_producto}
+										role="button"
+										tabIndex={0}
+										aria-label={`Ver detalle de ${producto.nombre_producto}`}
+										onClick={() => openDetail(producto)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" || event.key === " ") {
+												event.preventDefault()
+												openDetail(producto)
+											}
 									}}
-									className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-								>
-									<div className="flex items-start justify-between gap-3">
-										<div className="min-w-0">
-											<div className="flex flex-wrap items-center gap-2">
-												<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-													{producto.codigo_producto}
-												</span>
-												{activeCategory === "all" && (
+										className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+									>
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0">
+												<div className="flex flex-wrap items-center gap-2">
+													<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+														{producto.codigo_producto}
+													</span>
 													<span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
 														{(inferred ?? "N/D").toUpperCase()}
 													</span>
-												)}
-												{critical && (
-													<span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-														Crítico
+													<span className={`rounded-full px-3 py-1 text-xs font-semibold ${stockStatusClass}`}>{stockStatusText}</span>
+													<span className={`rounded-full px-3 py-1 text-xs font-semibold ${salesStatusClass}`}>
+														{salesStatus ? salesStatusLabel(salesStatus) : "Ventas: —"}
 													</span>
-												)}
+													<span className={`rounded-full px-3 py-1 text-xs font-semibold ${marginStatusClass}`}>{marginStatusLabel(marginStatus)}</span>
+												</div>
+												<p className="mt-2 truncate text-sm font-semibold text-slate-900">{producto.nombre_producto}</p>
+												{producto.descripcion && <p className="mt-1 line-clamp-1 text-xs text-slate-500">{producto.descripcion}</p>}
 											</div>
-											<p className="mt-2 truncate text-sm font-semibold text-slate-900">{producto.nombre_producto}</p>
-											{producto.descripcion && <p className="mt-1 line-clamp-1 text-xs text-slate-500">{producto.descripcion}</p>}
+											<div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+												<div className="flex items-center gap-1">
+													<button
+														type="button"
+														onClick={() => openEdit(producto)}
+														className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+														aria-label="Editar"
+													>
+														<Pencil className="h-4 w-4" />
+													</button>
+													<button
+														type="button"
+														onClick={() => openStockAdjust(producto)}
+														className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+														aria-label="Ajustar stock"
+													>
+														<Boxes className="h-4 w-4" />
+													</button>
+													<ProductActionsMenu producto={producto} />
+												</div>
+											</div>
 										</div>
-										<div className="flex shrink-0 items-center gap-2">
-											<button
-												onClick={(event) => {
-												event.stopPropagation()
-												openEdit(producto)
-											}}
-												className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
-											>
-												<Edit2 className="h-4 w-4" />
-											</button>
-											<button
-												onClick={(event) => {
-												event.stopPropagation()
-												handleDelete(producto)
-											}}
-												className="rounded-xl border border-red-200 bg-white p-2 text-red-600 transition hover:bg-red-50"
-												disabled={deleteMutation.isPending}
-											>
-												<Trash2 className="h-4 w-4" />
-											</button>
-										</div>
-									</div>
 
-									<div className="mt-4 grid grid-cols-2 gap-3">
-										<div className="text-sm text-slate-700">
-											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Proveedor</p>
-											<p className="mt-1 truncate font-semibold text-slate-900">{producto.proveedor?.nombre_proveedor ?? "Sin proveedor"}</p>
+										<div className="mt-4 grid grid-cols-2 gap-3">
+											<div className="text-sm text-slate-700">
+												<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Proveedor</p>
+												<p className="mt-1 truncate font-semibold text-slate-900">
+													{producto.proveedor?.nombre_proveedor ?? "Sin proveedor"}
+												</p>
+											</div>
+											<div className="text-sm text-slate-700">
+												<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Precios</p>
+												<p className="mt-1 font-semibold text-slate-900">Venta: {currency.format(producto.precio_venta)}</p>
+												<p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+													<span>Compra: {purchaseDisplay}</span>
+													{producto.precio_compra > 0 ? null : (
+														<span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+															Sin costo
+														</span>
+													)}
+												</p>
+												<p className="mt-1 text-xs text-slate-500">Margen: {margin === null ? "—" : currency.format(margin)}</p>
+											</div>
 										</div>
-										<div className="text-sm text-slate-700">
-											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Venta</p>
-											<p className="mt-1 font-semibold text-slate-900">{currency.format(producto.precio_venta)}</p>
-											<p className="mt-1 text-xs text-slate-500">Compra: {currency.format(producto.precio_compra)}</p>
-										</div>
-									</div>
 
-									<div className="mt-3 text-sm">
-										<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Stock</p>
-										<span
-											className={`mt-1 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
-												critical ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
-											}`}
-										>
-											<Boxes className="h-3.5 w-3.5" />
-											{producto.cantidad_stock} uds
-										</span>
-										<p className="mt-1 text-xs text-slate-500">Mínimo: {producto.stock_minimo}</p>
+										<div className="mt-3 text-sm">
+											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Stock</p>
+											<div className="mt-1 flex flex-wrap items-center gap-2">
+												<span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${stockStatusClass}`}>
+													<Boxes className="h-3.5 w-3.5" />
+													{producto.cantidad_stock} uds
+												</span>
+												<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+													Mín: {producto.stock_minimo}
+												</span>
+											</div>
+										</div>
 									</div>
-								</div>
-							)
-						})}
-					</div>
+								)
+							})}
+						</div>
+					) : (
+						<div className="mt-4 overflow-x-auto">
+							<table className="min-w-[980px] w-full text-sm">
+								<thead className="sticky top-0 bg-white">
+									<tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+										<th className="py-3 pr-4">Código</th>
+										<th className="py-3 pr-4">Producto</th>
+										<th className="py-3 pr-4">Proveedor</th>
+										<th className="py-3 pr-4">Precios</th>
+										<th className="py-3 pr-4">Stock</th>
+										<th className="py-3 text-right">Acciones</th>
+									</tr>
+								</thead>
+								<tbody className="divide-y divide-slate-200">
+									{displayedProducts.map((producto) => {
+										const stockStatus = resolveProductStockStatus(producto)
+										const stockStatusText = productStockStatusLabel(stockStatus)
+										const salesStatus = getCachedSalesStatus(producto.id_producto)
+										const marginStatus = resolveMarginStatus(producto)
+										const inferred = inferCategoryFromCode(producto.codigo_producto)
+										const purchaseDisplay = producto.precio_compra > 0 ? currency.format(producto.precio_compra) : "—"
+										const margin = computeMargin(producto.precio_compra, producto.precio_venta)
+										const stockStatusClass =
+											stockStatus === "SIN_STOCK"
+												? "bg-slate-100 text-slate-700"
+												: stockStatus === "CRITICAL"
+													? "bg-red-50 text-red-700"
+													: stockStatus === "LOW"
+														? "bg-amber-50 text-amber-700"
+														: "bg-emerald-50 text-emerald-700"
+										const salesStatusClass =
+											salesStatus === null
+												? "bg-slate-100 text-slate-700"
+												: salesStatus === "NO_SALES_30D"
+													? "bg-amber-50 text-amber-700"
+													: "bg-emerald-50 text-emerald-700"
+										const marginStatusClass =
+											marginStatus === "NO_COST"
+												? "bg-slate-100 text-slate-700"
+												: marginStatus === "LOW_MARGIN"
+													? "bg-amber-50 text-amber-700"
+													: "bg-emerald-50 text-emerald-700"
+
+										return (
+											<tr
+												key={producto.id_producto}
+												className="cursor-pointer hover:bg-slate-50"
+												onClick={() => openDetail(producto)}
+											>
+												<td className="py-3 pr-4 align-top">
+													<div className="flex flex-wrap items-center gap-2">
+														<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+															{producto.codigo_producto}
+														</span>
+														<span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+															{(inferred ?? "N/D").toUpperCase()}
+														</span>
+													</div>
+												</td>
+												<td className="py-3 pr-4 align-top">
+													<p className="text-sm font-semibold text-slate-900">{producto.nombre_producto}</p>
+													{producto.descripcion && <p className="mt-1 line-clamp-1 text-xs text-slate-500">{producto.descripcion}</p>}
+												</td>
+												<td className="py-3 pr-4 align-top text-sm font-semibold text-slate-900">
+													{producto.proveedor?.nombre_proveedor ?? "Sin proveedor"}
+												</td>
+												<td className="py-3 pr-4 align-top">
+													<p className="text-xs font-semibold text-slate-900">Venta: {currency.format(producto.precio_venta)}</p>
+																<p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+																	<span>Compra: {purchaseDisplay}</span>
+																	{producto.precio_compra > 0 ? null : (
+																		<span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+																			Sin costo
+																		</span>
+																	)}
+																</p>
+																<p className="mt-1 text-xs text-slate-500">Margen: {margin === null ? "—" : currency.format(margin)}</p>
+												</td>
+												<td className="py-3 pr-4 align-top">
+													<div className="flex flex-wrap items-center gap-2">
+														<span className={`rounded-full px-3 py-1 text-xs font-semibold ${stockStatusClass}`}>{stockStatusText}</span>
+														<span className={`rounded-full px-3 py-1 text-xs font-semibold ${salesStatusClass}`}>
+															{salesStatus ? salesStatusLabel(salesStatus) : "Ventas: —"}
+														</span>
+														<span className={`rounded-full px-3 py-1 text-xs font-semibold ${marginStatusClass}`}>{marginStatusLabel(marginStatus)}</span>
+														<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+															{producto.cantidad_stock} / {producto.stock_minimo}
+														</span>
+													</div>
+												</td>
+													<td className="py-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
+														<div className="inline-flex items-center justify-end gap-1">
+															<button
+																type="button"
+																onClick={() => openEdit(producto)}
+																className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+																aria-label="Editar"
+															>
+																<Pencil className="h-4 w-4" />
+															</button>
+															<button
+																type="button"
+																onClick={() => openStockAdjust(producto)}
+																className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+																aria-label="Ajustar stock"
+															>
+																<Boxes className="h-4 w-4" />
+															</button>
+															<ProductActionsMenu producto={producto} />
+														</div>
+													</td>
+											</tr>
+										)
+									})}
+								</tbody>
+							</table>
+						</div>
+					)}
 
 					{totalPages > 1 && (
 						<div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1402,6 +2174,139 @@ export default function ProductsPage() {
 					</div>
 				)}
 			</section>
+
+			<ProductsFiltersDrawer
+				open={filtersOpen}
+				onOpenChange={(open) => {
+					if (!open) setFiltersOpen(false)
+				}}
+				filtersDraft={filtersDraft}
+				setFiltersDraft={setFiltersDraft}
+				proveedores={proveedores}
+				onCancel={() => setFiltersOpen(false)}
+				onClearDraft={() => setFiltersDraft({ ...defaultFilters })}
+				onApply={applyFilters}
+			/>
+
+			<Drawer
+				open={false}
+				onOpenChange={(open) => {
+					if (!open) setFiltersOpen(false)
+				}}
+			>
+				<DrawerContent className="overflow-hidden">
+					<div className="flex h-dvh flex-col">
+						<DrawerHeader>
+							<DrawerTitle className="pr-10">Filtros</DrawerTitle>
+							<DrawerDescription>Refina el listado y aplica.</DrawerDescription>
+						</DrawerHeader>
+
+						<div className="flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-5">
+							<div>
+								<label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Categoría</label>
+								<select
+									value={filtersDraft.categoria}
+									onChange={(event) =>
+										setFiltersDraft((prev) => ({ ...prev, categoria: event.target.value as ProductsFilters["categoria"] }))
+									}
+									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+								>
+									<option value="all">Todas</option>
+									{productCategories.map((category) => (
+										<option key={category.value} value={category.value}>
+											{category.label}
+										</option>
+									))}
+								</select>
+							</div>
+
+							<div>
+								<label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Proveedor</label>
+								<select
+									value={String(filtersDraft.proveedorId)}
+									onChange={(event) => {
+										const raw = event.target.value
+										setFiltersDraft((prev) => ({
+											...prev,
+											proveedorId: raw === "all" ? "all" : Number(raw),
+										}))
+									}}
+									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+								>
+									<option value="all">Todos</option>
+									{proveedores.map((prov) => (
+										<option key={prov.id_proveedor} value={prov.id_proveedor}>
+											{prov.nombre_proveedor}
+										</option>
+									))}
+								</select>
+							</div>
+
+							<div>
+								<label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Stock</label>
+								<select
+									value={filtersDraft.stock}
+									onChange={(event) =>
+										setFiltersDraft((prev) => ({ ...prev, stock: event.target.value as ProductsFilters["stock"] }))
+									}
+									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+								>
+									<option value="all">Todos</option>
+									<option value="CRITICAL">Crítico</option>
+									<option value="LOW">Bajo</option>
+									<option value="NORMAL">Normal</option>
+									<option value="SIN_STOCK">Sin stock</option>
+								</select>
+							</div>
+
+							<div>
+								<label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ordenar</label>
+								<select
+									value={filtersDraft.orden}
+									onChange={(event) =>
+										setFiltersDraft((prev) => ({ ...prev, orden: event.target.value as ProductsFilters["orden"] }))
+									}
+									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+								>
+									<option value="name_asc">Nombre A-Z</option>
+									<option value="name_desc">Nombre Z-A</option>
+									<option value="stock_asc">Stock asc</option>
+									<option value="stock_desc">Stock desc</option>
+									<option value="price_asc">Precio asc</option>
+									<option value="price_desc">Precio desc</option>
+									<option value="recent">Más recientes</option>
+								</select>
+							</div>
+						</div>
+
+						<div className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
+							<button
+								type="button"
+								onClick={() => setFiltersOpen(false)}
+								className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+							>
+								Cancelar
+							</button>
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => setFiltersDraft({ ...defaultFilters })}
+									className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+								>
+									Limpiar
+								</button>
+								<button
+									type="button"
+									onClick={applyFilters}
+									className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+								>
+									Aplicar
+								</button>
+							</div>
+						</div>
+					</div>
+				</DrawerContent>
+			</Drawer>
 
 			<Dialog
 				open={dialogOpen}
@@ -1475,9 +2380,11 @@ export default function ProductsPage() {
 													<label className="text-xs font-medium uppercase text-slate-500">Categoría</label>
 													<select
 														{...form.register("categoria")}
-														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 												>
-														<option value="">Selecciona una categoría</option>
+															<option value="" className="text-slate-400">
+																Selecciona una categoría
+															</option>
 														{productCategories.map((category) => (
 															<option key={category.value} value={category.value}>
 																{category.label}
@@ -1506,7 +2413,7 @@ export default function ProductsPage() {
 												<label className="text-xs font-medium uppercase text-slate-500">Nombre</label>
 												<input
 													{...form.register("nombre_producto")}
-													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 													placeholder="Ej. Cuerda Ernie Ball 09"
 												/>
 												{form.formState.errors.nombre_producto && (
@@ -1517,11 +2424,13 @@ export default function ProductsPage() {
 												<label className="text-xs font-medium uppercase text-slate-500">Proveedor</label>
 												<select
 													{...form.register("id_proveedor")}
-													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-													disabled={proveedoresQuery.isLoading || noProveedoresDisponibles}
+														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+														disabled={proveedoresQuery.isLoading || proveedoresNoDisponibles || noProveedoresDisponibles}
 													defaultValue=""
 												>
-													<option value="">Selecciona un proveedor</option>
+														<option value="" className="text-slate-400">
+															Selecciona un proveedor
+														</option>
 													{proveedores.map((prov) => (
 														<option key={prov.id_proveedor} value={prov.id_proveedor}>
 															{prov.nombre_proveedor}
@@ -1539,7 +2448,7 @@ export default function ProductsPage() {
 											<textarea
 												rows={3}
 												{...form.register("descripcion")}
-												className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 												placeholder="Material, marca, observaciones..."
 											/>
 											{form.formState.errors.descripcion && (
@@ -1553,8 +2462,10 @@ export default function ProductsPage() {
 												<input
 													type="number"
 													step="0.01"
-													{...form.register("precio_compra", { valueAsNumber: true })}
-													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															{...form.register("precio_compra", {
+																onChange: () => form.clearErrors("precio_compra"),
+															})}
+														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 												/>
 												{form.formState.errors.precio_compra && (
 													<p className="mt-1 text-xs text-red-600">{form.formState.errors.precio_compra.message}</p>
@@ -1565,8 +2476,10 @@ export default function ProductsPage() {
 												<input
 													type="number"
 													step="0.01"
-													{...form.register("precio_venta", { valueAsNumber: true })}
-													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															{...form.register("precio_venta", {
+																onChange: () => form.clearErrors("precio_venta"),
+															})}
+														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 												/>
 												{form.formState.errors.precio_venta && (
 													<p className="mt-1 text-xs text-red-600">{form.formState.errors.precio_venta.message}</p>
@@ -1576,8 +2489,10 @@ export default function ProductsPage() {
 												<label className="text-xs font-medium uppercase text-slate-500">Stock actual</label>
 												<input
 													type="number"
-													{...form.register("cantidad_stock", { valueAsNumber: true })}
-													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															{...form.register("cantidad_stock", {
+																onChange: () => form.clearErrors("cantidad_stock"),
+															})}
+														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 												/>
 												{form.formState.errors.cantidad_stock && (
 													<p className="mt-1 text-xs text-red-600">{form.formState.errors.cantidad_stock.message}</p>
@@ -1587,8 +2502,10 @@ export default function ProductsPage() {
 												<label className="text-xs font-medium uppercase text-slate-500">Stock mínimo</label>
 												<input
 													type="number"
-													{...form.register("stock_minimo", { valueAsNumber: true })}
-													className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															{...form.register("stock_minimo", {
+																onChange: () => form.clearErrors("stock_minimo"),
+															})}
+														className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 												/>
 												{form.formState.errors.stock_minimo && (
 													<p className="mt-1 text-xs text-red-600">{form.formState.errors.stock_minimo.message}</p>
@@ -1624,7 +2541,7 @@ export default function ProductsPage() {
 												<div className="mt-3">
 													<input
 														{...form.register("imagen_url")}
-														className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 														placeholder="https://cdn-loja.com/preview.jpg"
 													/>
 													<p className="mt-1 text-xs text-slate-500">Solo referenciamos vistas ligeras. El sistema de ventas cargará las imágenes completas.</p>
@@ -1689,9 +2606,11 @@ export default function ProductsPage() {
 														<label className="text-xs font-medium uppercase text-slate-500">Categoría</label>
 														<select
 															{...form.register("categoria")}
-															className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 														>
-															<option value="">Selecciona una categoría</option>
+															<option value="" className="text-slate-400">
+																Selecciona una categoría
+															</option>
 															{productCategories.map((category) => (
 																<option key={category.value} value={category.value}>
 																	{category.label}
@@ -1706,11 +2625,13 @@ export default function ProductsPage() {
 														<label className="text-xs font-medium uppercase text-slate-500">Proveedor</label>
 														<select
 															{...form.register("id_proveedor")}
-															className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-															disabled={proveedoresQuery.isLoading || noProveedoresDisponibles}
+															className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+															disabled={proveedoresQuery.isLoading || proveedoresNoDisponibles || noProveedoresDisponibles}
 															defaultValue=""
 														>
-															<option value="">Selecciona un proveedor</option>
+															<option value="" className="text-slate-400">
+																Selecciona un proveedor
+															</option>
 															{proveedores.map((prov) => (
 																<option key={prov.id_proveedor} value={prov.id_proveedor}>
 																	{prov.nombre_proveedor}
@@ -1791,7 +2712,7 @@ export default function ProductsPage() {
 																			<input
 																				value={row.nombre_producto}
 																				onChange={(event) => handleBatchFieldChange(row.id, "nombre_producto", event.target.value)}
-																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 																				placeholder="Nombre del producto"
 																			/>
 																		</td>
@@ -1801,7 +2722,7 @@ export default function ProductsPage() {
 																				step="0.01"
 																				value={row.precio_compra}
 																				onChange={(event) => handleBatchFieldChange(row.id, "precio_compra", Number(event.target.value))}
-																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 																			/>
 																		</td>
 																		<td className="py-3 pr-3 align-top">
@@ -1810,7 +2731,7 @@ export default function ProductsPage() {
 																				step="0.01"
 																				value={row.precio_venta}
 																				onChange={(event) => handleBatchFieldChange(row.id, "precio_venta", Number(event.target.value))}
-																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 																			/>
 																		</td>
 																		<td className="py-3 pr-3 align-top">
@@ -1818,7 +2739,7 @@ export default function ProductsPage() {
 																				type="number"
 																				value={row.cantidad_stock}
 																				onChange={(event) => handleBatchFieldChange(row.id, "cantidad_stock", Number(event.target.value))}
-																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 																			/>
 																		</td>
 																		<td className="py-3 pr-3 align-top">
@@ -1826,7 +2747,7 @@ export default function ProductsPage() {
 																				type="number"
 																				value={row.stock_minimo}
 																				onChange={(event) => handleBatchFieldChange(row.id, "stock_minimo", Number(event.target.value))}
-																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																				className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 																			/>
 																		</td>
 																		<td className="py-3 align-top">
@@ -1936,9 +2857,11 @@ export default function ProductsPage() {
 																		prev ? { ...prev, mapping: { ...prev.mapping, [field.key]: event.target.value || null } } : prev
 																	)
 																}
-																className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+																		className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 															>
-																<option value="">Sin asignar</option>
+																		<option value="" className="text-slate-400">
+																			Sin asignar
+																		</option>
 																{importState.headers.map((header) => (
 																	<option key={header} value={header}>
 																		{header}
@@ -2019,95 +2942,256 @@ export default function ProductsPage() {
 				</DialogContent>
 			</Dialog>
 
-			<Drawer
+			<ProductsDetailDrawer
 				open={detailOpen}
 				onOpenChange={(open) => {
 					if (!open) closeDetail()
 				}}
+				product={detailProduct}
+				inferCategoryFromCode={inferCategoryFromCode}
+				currency={currency}
+				dateFormatter={dateFormatter}
+				sales={{
+					isLoading: productSalesQuery.isLoading,
+					isError: productSalesQuery.isError,
+					error: productSalesQuery.error,
+					data: productSalesQuery.data,
+				}}
+				movements={{
+					isLoading: kardexQuery.isLoading,
+					isError: kardexQuery.isError,
+					data: kardexQuery.data,
+				}}
+				onRetrySales={() => {
+					productSalesQuery.refetch()
+				}}
+				onRetryMovements={() => {
+					kardexQuery.refetch()
+				}}
+				onEdit={() => {
+					if (!detailProduct) return
+					openEdit(detailProduct)
+					closeDetail()
+				}}
+				onAdjustStock={() => {
+					if (!detailProduct) return
+					openStockAdjust(detailProduct)
+					closeDetail()
+				}}
+				onHistory={() => {
+					navigate("/ventas")
+					closeDetail()
+				}}
+				onClose={closeDetail}
+			/>
+
+			<Dialog
+				open={deleteConfirmOpen}
+				onOpenChange={(open) => {
+					if (!open) {
+						setDeleteConfirmOpen(false)
+						setDeleteTarget(null)
+					}
+				}}
 			>
-				<DrawerContent>
+				<DialogContent className="max-w-md" hideCloseButton>
+					<DialogHeader>
+						<DialogTitle>Confirmar eliminación</DialogTitle>
+						<DialogDescription>
+							¿Seguro que deseas eliminar {deleteTarget?.nombre_producto ?? "este producto"}? Esta acción es permanente.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="mt-4 flex items-center justify-end gap-2">
+						<button
+							type="button"
+							onClick={() => {
+							setDeleteConfirmOpen(false)
+							setDeleteTarget(null)
+						}}
+							className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+						>
+							Cancelar
+						</button>
+						<button
+							type="button"
+							disabled={deleteMutation.isPending || !deleteTarget}
+							onClick={() => {
+							if (!deleteTarget) return
+							deleteMutation.mutate(deleteTarget.id_producto)
+							setDeleteConfirmOpen(false)
+							setDeleteTarget(null)
+						}}
+							className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+						>
+							{deleteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+							Eliminar
+						</button>
+					</div>
+				</DialogContent>
+			</Dialog>
+
+			<Drawer
+				open={false}
+				onOpenChange={(open) => {
+					if (!open) closeDetail()
+				}}
+			>
+				<DrawerContent className="overflow-hidden">
 					{detailProduct && (
 						<div className="flex h-dvh flex-col">
 							<DrawerHeader>
 								<DrawerTitle className="pr-10">{detailProduct.nombre_producto}</DrawerTitle>
 								<DrawerDescription className="mt-1 flex flex-wrap items-center gap-2">
+									{(() => {
+										const status = resolveStockStatus(detailProduct)
+										const statusClass =
+											status === "out"
+												? "bg-slate-100 text-slate-700"
+												: status === "critical"
+													? "bg-red-50 text-red-700"
+													: status === "low"
+														? "bg-amber-50 text-amber-700"
+														: "bg-emerald-50 text-emerald-700"
+
+										return (
+											<>
 									<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
 										{detailProduct.codigo_producto}
 									</span>
 									<span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
 										{(inferCategoryFromCode(detailProduct.codigo_producto) ?? "N/D").toUpperCase()}
 									</span>
-									{detailProduct.cantidad_stock <= detailProduct.stock_minimo && (
-										<span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">Crítico</span>
-									)}
+									<span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}>{stockStatusLabel(status)}</span>
+										</>
+									)
+									})()}
 								</DrawerDescription>
+								<div className="mt-4 flex flex-wrap items-center gap-2">
+									<button
+										type="button"
+										onClick={() => {
+											openEdit(detailProduct)
+											closeDetail()
+										}}
+										className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+									>
+										Editar
+									</button>
+									<button
+										type="button"
+										onClick={() => {
+											openStockAdjust(detailProduct)
+											closeDetail()
+										}}
+										className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+									>
+										Ajustar stock
+									</button>
+									<button
+										type="button"
+										onClick={() => {
+											navigate("/ventas")
+											closeDetail()
+										}}
+										className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+									>
+										Historial
+									</button>
+									<button
+										type="button"
+										onClick={closeDetail}
+										className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+									>
+										Cerrar
+									</button>
+								</div>
 							</DrawerHeader>
 
-							<div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+							<div className="flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-6 py-5">
+								{(() => {
+									const status = resolveStockStatus(detailProduct)
+									const statusText = stockStatusLabel(status)
+									const purchaseDisplay = detailProduct.precio_compra > 0 ? currency.format(detailProduct.precio_compra) : "—"
+									const margin = computeMargin(detailProduct.precio_compra, detailProduct.precio_venta)
+									const percent =
+										detailProduct.stock_minimo > 0 ? Math.min(100, Math.round((detailProduct.cantidad_stock / detailProduct.stock_minimo) * 100)) : 100
+									const statusClass =
+										status === "out"
+											? "bg-slate-100 text-slate-700"
+											: status === "critical"
+												? "bg-red-50 text-red-700"
+												: status === "low"
+													? "bg-amber-50 text-amber-700"
+													: "bg-emerald-50 text-emerald-700"
+
+									return (
+										<>
+											<div className="rounded-2xl border border-slate-200 p-4">
+												<p className="text-sm font-semibold text-slate-700">Stock</p>
+												<div className="mt-3 grid gap-4 sm:grid-cols-3">
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Actual</p>
+														<p className="mt-1 text-2xl font-semibold text-slate-900">{detailProduct.cantidad_stock}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Mínimo</p>
+														<p className="mt-1 text-2xl font-semibold text-slate-900">{detailProduct.stock_minimo}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado</p>
+														<span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}>{statusText}</span>
+													</div>
+												</div>
+												<div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+													<div className="h-full bg-emerald-600" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+												</div>
+												<p className="mt-2 text-xs text-slate-500">Indicador respecto al stock mínimo.</p>
+											</div>
+
+											<div className="rounded-2xl border border-slate-200 p-4">
+												<p className="text-sm font-semibold text-slate-700">Información general</p>
+												<div className="mt-4 grid gap-4 sm:grid-cols-2">
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Proveedor</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{detailProduct.proveedor?.nombre_proveedor ?? "Sin proveedor"}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Código</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{detailProduct.codigo_producto}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Categoría</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{(inferCategoryFromCode(detailProduct.codigo_producto) ?? "N/D").toUpperCase()}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Descripción</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{detailProduct.descripcion?.trim() ? detailProduct.descripcion : "—"}</p>
+													</div>
+												</div>
+											</div>
+
+											<div className="rounded-2xl border border-slate-200 p-4">
+												<p className="text-sm font-semibold text-slate-700">Precios</p>
+												<div className="mt-4 grid gap-4 sm:grid-cols-3">
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Venta</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{currency.format(detailProduct.precio_venta)}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Compra</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{purchaseDisplay}</p>
+													</div>
+													<div>
+														<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Margen</p>
+														<p className="mt-1 text-sm font-semibold text-slate-900">{margin === null ? "—" : currency.format(margin)}</p>
+													</div>
+												</div>
+											</div>
+										</>
+									)
+								})()}
+
 								<div className="rounded-2xl border border-slate-200 p-4">
-									<div className="flex flex-wrap items-center justify-between gap-3">
-										<p className="text-sm font-semibold text-slate-700">Información general</p>
-										<div className="flex items-center gap-2">
-											<button
-												type="button"
-												onClick={() => {
-													openEdit(detailProduct)
-													closeDetail()
-												}}
-												className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-											>
-												Editar
-											</button>
-											<button
-												type="button"
-												onClick={() => {
-													navigate("/ventas")
-													closeDetail()
-												}}
-												className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-											>
-												Ver historial
-											</button>
-										</div>
-									</div>
-
-									<div className="mt-4 grid gap-4 sm:grid-cols-2">
-										<div>
-											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Proveedor</p>
-											<p className="mt-1 text-sm font-semibold text-slate-900">
-												{detailProduct.proveedor?.nombre_proveedor ?? "Sin proveedor"}
-											</p>
-										</div>
-										<div>
-											<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Precios</p>
-											<p className="mt-1 text-sm font-semibold text-slate-900">Venta: {currency.format(detailProduct.precio_venta)}</p>
-											<p className="mt-1 text-xs text-slate-500">Compra: {currency.format(detailProduct.precio_compra)}</p>
-										</div>
-									</div>
-								</div>
-
-							<div className="rounded-2xl border border-slate-200 p-4">
-								<p className="text-sm font-semibold text-slate-700">Estado de stock</p>
-								<div className="mt-3 flex flex-wrap items-center gap-2">
-									<span
-										className={
-											detailProduct.cantidad_stock <= detailProduct.stock_minimo
-												? "rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700"
-												: "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
-										}
-									>
-										{detailProduct.cantidad_stock <= detailProduct.stock_minimo ? "Crítico" : "Normal"}
-									</span>
-									<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-										Stock: {detailProduct.cantidad_stock}
-									</span>
-									<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-										Mínimo: {detailProduct.stock_minimo}
-									</span>
-								</div>
-							</div>
-
-							<div className="rounded-2xl border border-slate-200 p-4">
 								<p className="text-sm font-semibold text-slate-700">Ventas</p>
 								{productSalesQuery.isLoading ? (
 									<p className="mt-2 flex items-center gap-2 text-sm text-slate-500">
@@ -2117,12 +3201,16 @@ export default function ProductsPage() {
 									<p className="mt-2 text-sm text-red-600">No se pudo cargar el historial.</p>
 								) : (
 									<>
-										<div className="mt-3 grid gap-4 sm:grid-cols-2">
+											<div className="mt-3 grid gap-4 sm:grid-cols-3">
 											<div>
 												<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total vendido</p>
 												<p className="mt-1 text-2xl font-semibold text-slate-900">{productSalesQuery.data?.totalUnitsSold ?? 0}</p>
 											</div>
 											<div>
+													<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Últimos 30 días</p>
+													<p className="mt-1 text-2xl font-semibold text-slate-900">{productSalesQuery.data?.last30DaysUnitsSold ?? 0}</p>
+												</div>
+												<div>
 												<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Última venta</p>
 												<p className="mt-1 text-sm font-semibold text-slate-900">
 													{productSalesQuery.data?.lastSaleDate
@@ -2145,7 +3233,8 @@ export default function ProductsPage() {
 												<tbody className="divide-y divide-slate-200">
 													{(productSalesQuery.data?.recentLines ?? []).length === 0 ? (
 														<tr>
-															<td colSpan={4} className="py-4 text-sm text-slate-500">
+															<td colSpan={4} className="py-8 text-center text-sm text-slate-500">
+																<Package size={28} className="mx-auto mb-2 opacity-50" />
 																Sin ventas registradas para este producto.
 															</td>
 														</tr>

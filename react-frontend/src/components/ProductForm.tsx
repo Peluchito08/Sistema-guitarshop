@@ -78,7 +78,7 @@ export default function ProductForm({
         </label>
         <input
           {...register("codigo_producto")}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
           placeholder="CRD-001"
         />
         {errors.codigo_producto && (
@@ -95,7 +95,7 @@ export default function ProductForm({
         </label>
         <input
           {...register("nombre_producto")}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
           placeholder="Cuerda de guitarra acústica"
         />
         {errors.nombre_producto && (
@@ -112,7 +112,7 @@ export default function ProductForm({
         </label>
         <textarea
           {...register("descripcion")}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
           rows={3}
           placeholder="Detalle del producto, marca, modelo, etc."
         />
@@ -132,7 +132,7 @@ export default function ProductForm({
           type="number"
           step="0.01"
           {...register("precio_venta", { valueAsNumber: true })}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
         />
         {errors.precio_venta && (
           <p className="mt-1 text-xs text-red-600">
@@ -147,7 +147,7 @@ export default function ProductForm({
         <input
           type="number"
           {...register("cantidad_stock", { valueAsNumber: true })}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
         />
         {errors.cantidad_stock && (
           <p className="mt-1 text-xs text-red-600">
@@ -174,9 +174,9 @@ export default function ProductForm({
         ) : (
           <select
             {...register("id_proveedor", { valueAsNumber: true })}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
           >
-            <option value="">Selecciona un proveedor</option>
+            <option value="" className="text-slate-400">Selecciona un proveedor</option>
             {proveedores.map((prov) => (
               <option key={prov.id_proveedor} value={prov.id_proveedor}>
                 {prov.nombre_proveedor}
