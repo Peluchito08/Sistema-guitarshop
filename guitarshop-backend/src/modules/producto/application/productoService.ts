@@ -238,8 +238,8 @@ export async function listarProductosPaginado(
     nombre_producto: String(r.nombre_producto),
     descripcion: r.descripcion ?? null,
     id_proveedor: r.id_proveedor === null ? null : Number(r.id_proveedor),
-    precio_compra: r.precio_compra,
-    precio_venta: r.precio_venta,
+    precio_compra: r.precio_compra ?? 0,
+    precio_venta: r.precio_venta ?? 0,
     cantidad_stock: Number(r.cantidad_stock ?? 0),
     stock_minimo: Number(r.stock_minimo ?? 0),
     proveedor:
@@ -376,7 +376,7 @@ export async function actualizarProducto(
     throw new Error("PROVEEDOR_REQUERIDO");
   }
 
-  const updateData: Prisma.ProductoUpdateInput = {};
+  const updateData: Prisma.productoUncheckedUpdateInput = {};
 
   if (data.codigo_producto !== undefined)
     updateData.codigo_producto = data.codigo_producto;

@@ -94,7 +94,7 @@ export async function actualizarCliente(
     id_usuario_modifi?: number | null;
   }
 ) {
-  const updateData: Prisma.ClienteUpdateInput = {};
+  const updateData: Prisma.clienteUncheckedUpdateInput = {};
 
   if (data.nombres !== undefined) updateData.nombres = data.nombres;
   if (data.apellidos !== undefined) updateData.apellidos = data.apellidos;

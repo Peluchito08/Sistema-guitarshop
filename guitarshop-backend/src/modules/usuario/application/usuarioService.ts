@@ -101,7 +101,7 @@ export async function actualizarUsuario(
     id_usuario_modifi?: number | null;
   }
 ) {
-    const updateData: Prisma.UsuarioUpdateInput = {};
+    const updateData: Prisma.usuarioUncheckedUpdateInput = {};
 
   if (data.nombre_completo !== undefined)
     updateData.nombre_completo = data.nombre_completo;

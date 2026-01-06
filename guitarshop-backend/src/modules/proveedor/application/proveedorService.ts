@@ -89,7 +89,7 @@ export async function actualizarProveedor(
     id_usuario_modifi?: number | null;
   }
 ) {
-  const updateData: Prisma.ProveedorUpdateInput = {};
+  const updateData: Prisma.proveedorUncheckedUpdateInput = {};
 
   if (data.nombre_proveedor !== undefined)
     updateData.nombre_proveedor = data.nombre_proveedor;

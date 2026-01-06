@@ -1,4 +1,4 @@
-// guitarshop-backend/app/api/proveedores/[id]/route.ts
+// guitarshop-backend/app/api/proveedor/[id]/route.ts
 import { jsonCors, optionsCors } from "../../../../lib/cors";
 import { hasAdminRole, verifyToken } from "../../../../lib/auth";
 import {
@@ -19,7 +19,7 @@ function getIdFromUrl(req: Request): number | null {
   return Number.isNaN(id) ? null : id;
 }
 
-// GET /api/proveedores/:id
+// GET /api/proveedor/:id
 export async function GET(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -49,7 +49,7 @@ export async function GET(req: Request) {
 
     return jsonCors(proveedor, { status: 200 });
   } catch (error) {
-    console.error("Error GET /proveedores/:id", error);
+    console.error("Error GET /proveedor/:id", error);
     return jsonCors(
       { error: "Error al obtener proveedor" },
       { status: 500 }
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
   }
 }
 
-// PUT /api/proveedores/:id
+// PUT /api/proveedor/:id
 export async function PUT(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -93,7 +93,7 @@ export async function PUT(req: Request) {
 
     return jsonCors(proveedor, { status: 200 });
   } catch (error: unknown) {
-    console.error("Error PUT /proveedores/:id", error);
+    console.error("Error PUT /proveedor/:id", error);
 
     if (error instanceof Error && error.message === "PROVEEDOR_DUPLICADO") {
       return jsonCors(
@@ -109,7 +109,7 @@ export async function PUT(req: Request) {
   }
 }
 
-// DELETE /api/proveedores/:id
+// DELETE /api/proveedor/:id
 export async function DELETE(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -135,7 +135,7 @@ export async function DELETE(req: Request) {
     const proveedor = await eliminarProveedor(id);
     return jsonCors(proveedor, { status: 200 });
   } catch (error: unknown) {
-    console.error("Error DELETE /proveedores/:id", error);
+    console.error("Error DELETE /proveedor/:id", error);
 
     if (error instanceof Error && error.message === "PROVEEDOR_CON_RELACIONES") {
       return jsonCors(

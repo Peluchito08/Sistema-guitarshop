@@ -1,4 +1,4 @@
-// guitarshop-backend/app/api/proveedores/route.ts
+// guitarshop-backend/app/api/proveedor/route.ts
 import { jsonCors, optionsCors } from "../../../lib/cors";
 import { hasAdminRole, verifyToken } from "../../../lib/auth";
 import {
@@ -10,7 +10,7 @@ export async function OPTIONS() {
   return optionsCors();
 }
 
-// GET /api/proveedores
+// GET /api/proveedor
 export async function GET(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     const proveedores = await listarProveedores();
     return jsonCors(proveedores, { status: 200 });
   } catch (error) {
-    console.error("Error GET /proveedores:", error);
+    console.error("Error GET /proveedor:", error);
     return jsonCors(
       { error: "Error al obtener proveedores" },
       { status: 500 }
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/proveedores
+// POST /api/proveedor
 export async function POST(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
 
     return jsonCors(proveedor, { status: 201 });
   } catch (error: unknown) {
-    console.error("Error POST /proveedores:", error);
+    console.error("Error POST /proveedor:", error);
 
     if (error instanceof Error && error.message === "PROVEEDOR_DUPLICADO") {
       return jsonCors(
