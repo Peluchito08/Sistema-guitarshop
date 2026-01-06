@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     });
 
     return jsonCors(venta, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error POST /ventas:", error);
 
     if (error instanceof Error) {

@@ -9,15 +9,18 @@ Este repositorio contiene ambos entornos de trabajo para desarrollo colaborativo
 ## 📁 Estructura del Proyecto
 
 guitarshop/
- ├── guitarshop-backend/       → API REST con Next.js
- │    ├── prisma/              → Esquema del ORM Prisma
- │    ├── src/app/api/...      → Rutas de login, usuarios, productos, etc.
+ ├── guitarshop-backend/            → API REST con Next.js (App Router)
+ │    ├── app/api/...               → Rutas REST (login, usuarios, producto, etc.)
+ │    ├── src/shared/...            → Infra compartida (auth, cors, prisma)
+ │    ├── src/modules/...           → Servicios por módulo (application)
+ │    ├── prisma/                   → Esquema del ORM Prisma
  │    └── package.json
  │
- └── react-frontend/           → Interfaz creada con React + Vite
-      ├── src/pages/           → Login, Dashboard y rutas protegidas
-      ├── src/lib/apiClient.js → Configuración del cliente Axios
-      └── package.json
+ └── react-frontend/                → Interfaz creada con React + Vite
+    ├── src/features/...          → Pantallas y lógica por feature
+    ├── src/shared/api/apiClient  → Cliente Axios (canónico)
+    ├── src/lib/apiClient         → Re-export por compatibilidad
+    └── package.json
 
 ## ⚙️ Requisitos Previos
 | Herramienta 

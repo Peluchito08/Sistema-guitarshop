@@ -1,4 +1,4 @@
-// guitarshop-backend/app/api/productos/[id]/route.ts
+// guitarshop-backend/app/api/producto/[id]/route.ts
 import { jsonCors, optionsCors } from "../../../../lib/cors";
 import { verifyToken } from "../../../../lib/auth";
 import {
@@ -19,7 +19,7 @@ function getIdFromUrl(req: Request): number | null {
   return Number.isNaN(id) ? null : id;
 }
 
-// GET /api/productos/:id
+// GET /api/producto/:id
 export async function GET(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
 
     return jsonCors(producto, { status: 200 });
   } catch (error) {
-    console.error("Error GET /productos/:id", error);
+    console.error("Error GET /producto/:id", error);
     return jsonCors(
       { error: "Error al obtener producto" },
       { status: 500 }
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
   }
 }
 
-// PUT /api/productos/:id
+// PUT /api/producto/:id
 export async function PUT(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -81,8 +81,8 @@ export async function PUT(req: Request) {
     });
 
     return jsonCors(producto, { status: 200 });
-  } catch (error: any) {
-    console.error("Error PUT /productos/:id", error);
+  } catch (error: unknown) {
+    console.error("Error PUT /producto/:id", error);
 
     if (error instanceof Error) {
       if (error.message === "PRODUCTO_DUPLICADO") {
@@ -106,7 +106,7 @@ export async function PUT(req: Request) {
   }
 }
 
-// DELETE /api/productos/:id
+// DELETE /api/producto/:id
 export async function DELETE(req: Request) {
   const auth = verifyToken(req);
   if (!auth.valid) {
@@ -124,8 +124,8 @@ export async function DELETE(req: Request) {
   try {
     const producto = await eliminarProducto(id);
     return jsonCors(producto, { status: 200 });
-  } catch (error: any) {
-    console.error("Error DELETE /productos/:id", error);
+  } catch (error: unknown) {
+    console.error("Error DELETE /producto/:id", error);
 
     if (error instanceof Error && error.message === "PRODUCTO_CON_RELACIONES") {
       return jsonCors(

@@ -92,7 +92,7 @@ export async function PATCH(req: Request) {
       },
       { status: 200 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error PATCH /cuota/:id", error);
 
     if (error instanceof Error) {

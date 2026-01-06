@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     });
 
     return jsonCors(cliente, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error POST /clientes:", error);
 
     if (error instanceof Error && error.message === "CLIENTE_DUPLICADO") {

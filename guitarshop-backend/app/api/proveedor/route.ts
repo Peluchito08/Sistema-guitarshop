@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     });
 
     return jsonCors(proveedor, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error POST /proveedores:", error);
 
     if (error instanceof Error && error.message === "PROVEEDOR_DUPLICADO") {

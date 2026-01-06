@@ -93,7 +93,7 @@ export async function PUT(req: Request) {
     });
 
     return jsonCors(cliente, { status: 200 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error PUT /clientes/:id", error);
 
     if (error instanceof Error && error.message === "CLIENTE_DUPLICADO") {

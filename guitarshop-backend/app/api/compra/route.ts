@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     });
 
     return jsonCors(compra, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error POST /compras:", error);
 
     if (error instanceof Error && error.message === "DETALLE_VACIO") {

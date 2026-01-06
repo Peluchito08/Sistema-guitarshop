@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GuitarShop Backend (Next.js + Prisma)
 
-## Getting Started
+API REST construida con Next.js (App Router) y Prisma (PostgreSQL).
 
-First, run the development server:
+## Requisitos
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js
+- PostgreSQL
+
+## Variables de entorno
+
+Crea un archivo `.env` en esta carpeta con al menos:
+
+```env
+DATABASE_URL="postgresql://postgres:12345@localhost:5432/guitarshop?schema=public"
+JWT_SECRET="GuitarShop_123"
+CORS_ORIGIN="http://localhost:5173"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Instalación y ejecución
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npx prisma generate
+npx prisma migrate dev
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Servidor por defecto: http://localhost:3000
 
-## Learn More
+## Estructura (Clean Architecture pragmática)
 
-To learn more about Next.js, take a look at the following resources:
+- `app/api/**` → Capa de entrega (HTTP). Mantiene los nombres/rutas de endpoints.
+- `src/shared/**` → Infra compartida
+	- `src/shared/auth` (JWT + helpers)
+	- `src/shared/http/cors` (helpers de CORS)
+	- `src/shared/prisma` (PrismaClient singleton)
+- `src/modules/**/application/*Service.ts` → Casos de uso / lógica de aplicación por módulo.
+- `lib/**` → Puentes de compatibilidad (re-export) para no romper imports existentes.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Nota sobre endpoints "stub" (501)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Algunos endpoints existían como archivos `route.ts` vacíos (lo que rompe el build de Next). Para mantener las rutas sin cambiarlas, ahora responden `501 Endpoint no implementado`:
 
-## Deploy on Vercel
+- `/api/detalle_factura` y `/api/detalle_factura/[id]`
+- `/api/factura` y `/api/factura/[id]`
+- `/api/kardex` y `/api/kardex/[id]`
+- `/api/producto_compra` y `/api/producto_compra/[id]`
+- `/api/producto_venta` y `/api/producto_venta/[id]`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Si estos endpoints deben funcionar, se implementan sus handlers dentro de `app/api/**` usando los servicios en `src/modules/**` (sin renombrar rutas).

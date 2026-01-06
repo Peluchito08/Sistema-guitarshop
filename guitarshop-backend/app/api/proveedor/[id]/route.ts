@@ -92,7 +92,7 @@ export async function PUT(req: Request) {
     });
 
     return jsonCors(proveedor, { status: 200 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error PUT /proveedores/:id", error);
 
     if (error instanceof Error && error.message === "PROVEEDOR_DUPLICADO") {
@@ -134,7 +134,7 @@ export async function DELETE(req: Request) {
   try {
     const proveedor = await eliminarProveedor(id);
     return jsonCors(proveedor, { status: 200 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error DELETE /proveedores/:id", error);
 
     if (error instanceof Error && error.message === "PROVEEDOR_CON_RELACIONES") {
