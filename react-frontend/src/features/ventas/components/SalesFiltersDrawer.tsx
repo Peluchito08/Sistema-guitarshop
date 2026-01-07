@@ -43,7 +43,7 @@ export function SalesFiltersDrawer(props: Props) {
 										estado: event.target.value as SalesFilters["estado"],
 									}))
 								}
-								className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+								className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 							>
 								<option value="all">Todos</option>
 								<option value="ACTIVA">Activa</option>
@@ -61,7 +61,7 @@ export function SalesFiltersDrawer(props: Props) {
 										formaPago: event.target.value as SalesFilters["formaPago"],
 									}))
 								}
-								className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+								className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 							>
 								<option value="all">Todas</option>
 								<option value="CONTADO">Contado</option>
@@ -76,7 +76,7 @@ export function SalesFiltersDrawer(props: Props) {
 									type="date"
 									value={props.filtersDraft.fechaDesde}
 									onChange={(event) => props.setFiltersDraft((prev) => ({ ...prev, fechaDesde: event.target.value }))}
-									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 								/>
 							</div>
 							<div>
@@ -85,7 +85,7 @@ export function SalesFiltersDrawer(props: Props) {
 									type="date"
 									value={props.filtersDraft.fechaHasta}
 									onChange={(event) => props.setFiltersDraft((prev) => ({ ...prev, fechaHasta: event.target.value }))}
-									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+									className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
 								/>
 							</div>
 						</div>
@@ -110,7 +110,7 @@ export function SalesFiltersDrawer(props: Props) {
 							<button
 								type="button"
 								onClick={props.onApply}
-								className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+								className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
 							>
 								Aplicar
 							</button>

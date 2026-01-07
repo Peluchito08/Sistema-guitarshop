@@ -1,8 +1,12 @@
 import { CreditCard, Loader2, NotebookPen, XOctagon } from "lucide-react"
+import { useState } from "react"
 
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "../../../components/ui/drawer"
 import type { VentaDetailRecord } from "../../../services/salesService"
 import { formatMoneyOrDash } from "../../../utils/number"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog"
+import { SaleInvoicePrintable } from "./SaleInvoicePrintable"
+import { downloadSalePdf } from "../utils/salePdf"
 
 type Props = {
 	open: boolean
@@ -25,7 +29,20 @@ type Props = {
 }
 
 export function SalesDetailDrawer(props: Props) {
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
 	const sale = props.sale
+  const emailSale = (venta: VentaDetailRecord) => {
+    const subject = `Factura ${venta.numero_factura || ""}`
+    const clienteNombre = venta.cliente ? `${venta.cliente.nombres} ${venta.cliente.apellidos}` : "Cliente"
+    const body = [
+      `Estimado/a ${clienteNombre},`,
+      "\nAdjunto la factura.",
+      venta.fecha_factura ? `\nFecha: ${new Date(venta.fecha_factura).toLocaleString("es-EC")}` : "",
+      `\nTotal: $${Number(venta.total ?? 0).toFixed(2)}`,
+      "\n\nGracias por su compra."
+    ].join("")
+    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
 
 	return (
 		<Drawer open={props.open} onOpenChange={props.onOpenChange}>
@@ -43,7 +60,7 @@ export function SalesDetailDrawer(props: Props) {
 								className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
 							>
 								<NotebookPen className="h-4 w-4" />
-								Editar
+								Editar observaciones
 							</button>
 
 							<button
@@ -185,11 +202,17 @@ export function SalesDetailDrawer(props: Props) {
 									</div>
 								</div>
 
+								<div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+									<button type="button" onClick={() => setInvoiceOpen(true)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Imprimir / Exportar</button>
+									<button type="button" onClick={() => downloadSalePdf(sale)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Descargar PDF</button>
+									<button type="button" onClick={() => emailSale(sale)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Enviar por correo</button>
+								</div>
+
 								{sale.credito && (
-									<div className="rounded-2xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-900">
+									<div className="rounded-2xl border border-purple-200 bg-purple-50 p-4 text-sm text-slate-700">
 										<div className="flex items-center justify-between">
 											<p className="font-semibold">Crédito #{sale.credito.id_credito}</p>
-											<CreditCard className="h-4 w-4 text-purple-600" />
+											<CreditCard className="h-4 w-4 text-purple-500" />
 										</div>
 										<p>Monto total: {formatMoneyOrDash(sale.credito.monto_total)}</p>
 										<p>Saldo pendiente: {formatMoneyOrDash(sale.credito.saldo_pendiente)}</p>
@@ -204,6 +227,23 @@ export function SalesDetailDrawer(props: Props) {
 					</div>
 				</div>
 			</DrawerContent>
+
+			{sale && (
+				<Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
+					<DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-y-auto" hideCloseButton>
+						<DialogHeader className="no-print">
+							<DialogTitle>Factura de venta</DialogTitle>
+						</DialogHeader>
+						<SaleInvoicePrintable sale={sale} />
+						<div className="mt-4 flex flex-wrap items-center justify-end gap-2 no-print">
+							<button type="button" onClick={() => window.print()} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Imprimir</button>
+							<button type="button" onClick={() => downloadSalePdf(sale)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Descargar PDF</button>
+							<button type="button" onClick={() => emailSale(sale)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Enviar por correo</button>
+							<button type="button" onClick={() => setInvoiceOpen(false)} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Cerrar</button>
+						</div>
+					</DialogContent>
+				</Dialog>
+			)}
 		</Drawer>
 	)
 }

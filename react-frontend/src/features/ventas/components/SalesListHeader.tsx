@@ -1,3 +1,5 @@
+import { Search, SlidersHorizontal } from "lucide-react"
+
 export type SalesFilterChip = {
 	key: "estado" | "formaPago" | "fecha"
 	label: string
@@ -12,12 +14,6 @@ type Props = {
 	onSearchInputChange: (next: string) => void
 
 	onOpenFilters: () => void
-
-	pageSize: number
-	onChangePageSize: (next: number) => void
-
-	onOpenCreate: () => void
-	createDisabled?: boolean
 
 	filterChips: SalesFilterChip[]
 	onRemoveChip: (key: SalesFilterChip["key"]) => void
@@ -36,46 +32,24 @@ export function SalesListHeader(props: Props) {
 					</p>
 				</div>
 
-				<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-					<input
-						value={props.searchInput}
-						onChange={(event) => props.onSearchInputChange(event.target.value)}
-						placeholder="Buscar por factura, cliente o cédula"
-						className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-80"
-					/>
-
-					<button
-						type="button"
-						onClick={props.onOpenFilters}
-						className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-					>
-						Filtros
-					</button>
-
-					<div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-						<label htmlFor="sales-page-size" className="text-xs font-semibold text-slate-600">
-							Por página
-						</label>
-						<select
-							id="sales-page-size"
-							value={String(props.pageSize)}
-							onChange={(event) => props.onChangePageSize(Number(event.target.value))}
-							className="h-8 rounded-xl border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-						>
-							<option value="8">8</option>
-							<option value="16">16</option>
-							<option value="24">24</option>
-							<option value="32">32</option>
-						</select>
+				<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+					<div className="relative w-full flex-1 sm:min-w-[300px] md:min-w-[360px] lg:min-w-[420px]">
+						<Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+						<input
+							value={props.searchInput}
+							onChange={(event) => props.onSearchInputChange(event.target.value)}
+							placeholder="Buscar por factura, cliente o cédula"
+							className="w-full rounded-2xl border border-slate-200 py-2.5 pl-11 pr-4 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+						/>
 					</div>
 
 					<button
 						type="button"
-						onClick={props.onOpenCreate}
-						disabled={props.createDisabled}
-						className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+						onClick={props.onOpenFilters}
+						className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
 					>
-						Nueva venta
+						<SlidersHorizontal className="h-4 w-4 text-slate-500" aria-hidden="true" />
+						Filtros
 					</button>
 				</div>
 			</div>
